@@ -20,7 +20,6 @@ import {
   Info,
   Edit3,
   Award,
-  Swords,
   Sun,
   Moon,
   Train,
@@ -36,6 +35,8 @@ import {
   Coins,
   Handshake,
   Share2,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 
 // ==========================================
@@ -129,6 +130,15 @@ const PLAYER_COLORS = [
   },
 ];
 
+const PRESET_COLORS = [
+  { label: "Pink", hex: "#ec4899" },
+  { label: "Purple", hex: "#a855f7" },
+  { label: "Green", hex: "#22c55e" },
+  { label: "Yellow", hex: "#eab308" },
+  { label: "Blue", hex: "#3b82f6" },
+  { label: "Cyan", hex: "#06b6d4" },
+];
+
 const DEFAULT_PROPERTIES = [
   {
     id: "p1",
@@ -156,7 +166,7 @@ const DEFAULT_PROPERTIES = [
     id: "p3",
     name: "Reading Railroad",
     group: "Railroad",
-    color: "bg-neutral-900",
+    color: "bg-[#171717]",
     price: 200,
     mort: 100,
     type: "railroad",
@@ -213,7 +223,7 @@ const DEFAULT_PROPERTIES = [
     id: "p8",
     name: "Electric Company",
     group: "Utility",
-    color: "bg-neutral-300",
+    color: "bg-[#d4d4d8]",
     text: "text-neutral-900",
     price: 150,
     mort: 75,
@@ -246,7 +256,7 @@ const DEFAULT_PROPERTIES = [
     id: "p11",
     name: "Penn. Railroad",
     group: "Railroad",
-    color: "bg-neutral-900",
+    color: "bg-[#171717]",
     price: 200,
     mort: 100,
     type: "railroad",
@@ -322,7 +332,7 @@ const DEFAULT_PROPERTIES = [
     id: "p18",
     name: "B. & O. Railroad",
     group: "Railroad",
-    color: "bg-neutral-900",
+    color: "bg-[#171717]",
     price: 200,
     mort: 100,
     type: "railroad",
@@ -356,7 +366,7 @@ const DEFAULT_PROPERTIES = [
     id: "p21",
     name: "Water Works",
     group: "Utility",
-    color: "bg-neutral-300",
+    color: "bg-[#d4d4d8]",
     text: "text-neutral-900",
     price: 150,
     mort: 75,
@@ -412,7 +422,7 @@ const DEFAULT_PROPERTIES = [
     id: "p26",
     name: "Short Line Railroad",
     group: "Railroad",
-    color: "bg-neutral-900",
+    color: "bg-[#171717]",
     price: 200,
     mort: 100,
     type: "railroad",
@@ -615,6 +625,7 @@ const INITIAL_STATE = {
     housesBeforeHotel: 4,
     enableTreasureBucket: true,
     theme: "dark",
+    customColors: [],
   },
   setupError: null,
   pendingBmsAlert: null,
@@ -878,72 +889,6 @@ function gameReducer(state, action) {
       };
     }
 
-    case "HOSTILE_TAKEOVER": {
-      const { propertyId, buyerId } = action.payload;
-      const propDef = state.board.find((p) => p.id === propertyId);
-      let newPlayers = [...state.players];
-      let newPropState = { ...state.propertyState };
-
-      const pState = newPropState[propertyId];
-      if (!pState || !pState.ownerId || !pState.mortgaged) return state;
-
-      const originalOwnerId = pState.ownerId;
-      const cost = propDef.price * 2;
-      const refund = propDef.mort;
-
-      const buyerIdx = newPlayers.findIndex((p) => p.id === buyerId);
-      const ownerIdx = newPlayers.findIndex((p) => p.id === originalOwnerId);
-      const buyerName = newPlayers[buyerIdx].name;
-
-      newPlayers[buyerIdx].balance -= cost;
-      newPlayers[ownerIdx].balance += refund;
-
-      const newBmsGroup = checkBmsGroup(
-        state.board,
-        state.propertyState,
-        propertyId,
-        buyerId,
-      );
-
-      newPropState[propertyId] = {
-        ownerId: buyerId,
-        houses: 0,
-        mortgaged: false,
-      };
-
-      let triggeredBankruptcy = null;
-      if (newPlayers[buyerIdx].balance === 0) {
-        triggeredBankruptcy = buyerId;
-      }
-
-      return {
-        ...state,
-        players: newPlayers,
-        propertyState: newPropState,
-        error: null,
-        pendingBankruptcy: triggeredBankruptcy,
-        pendingBmsAlert: newBmsGroup
-          ? {
-              playerName: buyerName,
-              groupName: newBmsGroup.group,
-              color: newBmsGroup.color,
-            }
-          : null,
-        history: [
-          {
-            id: generateId(),
-            timestamp: Date.now(),
-            from: buyerId,
-            to: originalOwnerId,
-            amount: cost,
-            type: "PROPERTY",
-            message: `${buyerName} seized ${propDef.name}`,
-          },
-          ...state.history,
-        ],
-      };
-    }
-
     case "EXECUTE_TRADE": {
       const { p1Id, p2Id, p1Offer, p2Offer } = action.payload;
       let newPlayers = [...state.players];
@@ -1047,7 +992,7 @@ function gameReducer(state, action) {
         );
         newPropState[propertyId] = { ...pState, ownerId: targetPlayerId };
         const receiver = newPlayers.find((p) => p.id === targetPlayerId);
-        historyMsg = `${pName} traded ${propDef.name} to ${receiver.name}`;
+        historyMsg = `${pName} transferred ${propDef.name} to ${receiver.name}`;
       } else {
         if (["BUY", "BUILD", "UNMORTGAGE"].includes(actionType)) {
           newPlayers[pIdx].balance -= amount;
@@ -1081,7 +1026,7 @@ function gameReducer(state, action) {
         } else if (actionType === "SELL_BUILD") {
           newPropState[propertyId] = { ...pState, houses: pState.houses - 1 };
           historyMsg =
-            pState.houses >= (state.settings.housesBeforeHotel ?? 4)
+            pState.houses > (state.settings.housesBeforeHotel ?? 4)
               ? `${pName} sold a Hotel on ${propDef.name}`
               : `${pName} sold a House on ${propDef.name}`;
         } else if (actionType === "MORTGAGE") {
@@ -1213,6 +1158,7 @@ const renderDynamicIcon = (iconName, size, className) => {
 export default function App() {
   const [state, dispatch] = useReducer(gameReducer, INITIAL_STATE);
   const [activeTab, setActiveTab] = useState("home");
+  const [assetView, setAssetView] = useState("list");
 
   const t = THEMES[state.settings.theme] || THEMES.dark;
   const isDark = t.isDark;
@@ -1237,6 +1183,8 @@ export default function App() {
   const [isEditingBoard, setIsEditingBoard] = useState(false);
   const [boardResetConfirm, setBoardResetConfirm] = useState(false);
   const [showAddPropType, setShowAddPropType] = useState(false);
+  const [colorPickerTarget, setColorPickerTarget] = useState(null);
+  const [tempCustomColor, setTempCustomColor] = useState("#ffffff");
 
   const [customBuyPrice, setCustomBuyPrice] = useState("0");
   const [isEditingBuyPrice, setIsEditingBuyPrice] = useState(false);
@@ -1377,6 +1325,7 @@ export default function App() {
     setTxType("PAY_PLAYER");
     setTargetId("");
     setAmountStr("0");
+    setColorPickerTarget(null);
   };
 
   const handleNumpad = (val) => {
@@ -1472,17 +1421,22 @@ export default function App() {
   };
 
   const handleExport = () => {
-    const dataStr =
-      "data:text/json;charset=utf-8," +
-      encodeURIComponent(JSON.stringify(state));
-    const dlAnchorElem = document.createElement("a");
-    dlAnchorElem.setAttribute("href", dataStr);
-    dlAnchorElem.setAttribute(
-      "download",
-      `bms_save_${new Date().getTime()}.json`,
-    );
-    dlAnchorElem.click();
-    showToast("Game state exported!");
+    try {
+      const dataStr = JSON.stringify(state);
+      const blob = new Blob([dataStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const dlAnchorElem = document.createElement("a");
+      dlAnchorElem.setAttribute("href", url);
+      dlAnchorElem.setAttribute(
+        "download",
+        `bms_save_${new Date().getTime()}.json`,
+      );
+      dlAnchorElem.click();
+      URL.revokeObjectURL(url);
+      showToast("Game state exported!");
+    } catch (e) {
+      showToast("Export failed.", "error");
+    }
   };
 
   const handleImport = (e) => {
@@ -1492,17 +1446,18 @@ export default function App() {
     reader.onload = (event) => {
       try {
         const json = JSON.parse(event.target.result);
-        if (json.phase && json.players) {
+        if (json && json.players && Array.isArray(json.players)) {
           dispatch({ type: "LOAD_STATE", payload: json });
-          showToast("Game state loaded!");
+          showToast("Game state loaded successfully!");
         } else {
-          alert("Invalid save file format.");
+          showToast("Invalid save file format.", "error");
         }
       } catch (err) {
-        alert("Error reading file.");
+        showToast("Error reading file.", "error");
       }
     };
     reader.readAsText(file);
+    e.target.value = null; // Reset the input
   };
 
   const updateBoardItem = (idx, updates) => {
@@ -1515,7 +1470,7 @@ export default function App() {
     const newBoard = [...state.board];
     newBoard.splice(idx, 1);
     dispatch({ type: "UPDATE_BOARD", payload: newBoard });
-    showToast("Property deleted", "error");
+    showToast("Property deleted", "success");
   };
 
   const addBoardItem = (type) => {
@@ -1534,8 +1489,8 @@ export default function App() {
           type === "street"
             ? "bg-[#888888]"
             : type === "railroad"
-              ? "bg-neutral-900"
-              : "bg-neutral-300",
+              ? "bg-[#171717]"
+              : "bg-[#d4d4d8]",
         price: type === "street" ? 100 : type === "railroad" ? 200 : 150,
         build: type === "street" ? 50 : undefined,
         hotel: type === "street" ? 50 : undefined,
@@ -1551,7 +1506,7 @@ export default function App() {
       },
     ];
     dispatch({ type: "UPDATE_BOARD", payload: newBoard });
-    showToast("New property added");
+    showToast("New property added", "success");
   };
 
   // ==========================================
@@ -1897,6 +1852,114 @@ export default function App() {
           </div>
         )}
 
+        {/* Color Picker Overlay */}
+        {colorPickerTarget !== null && (
+          <div
+            className={`absolute inset-0 z-[400] flex items-center justify-center backdrop-blur-sm animate-in fade-in duration-200 p-4 ${t.modalOverlay}`}
+          >
+            <div
+              className={`border rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 ease-out ${t.modalBg}`}
+            >
+              <div className="flex justify-between items-center mb-4">
+                <h3 className={`text-xl font-black ${t.textMain}`}>
+                  Select Color
+                </h3>
+                <button
+                  onClick={() => setColorPickerTarget(null)}
+                  className={`p-2 rounded-full hover:bg-black/10 ${t.textMuted}`}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="mb-4">
+                <p
+                  className={`text-[10px] uppercase font-bold tracking-widest mb-2 ${t.textMuted}`}
+                >
+                  Presets
+                </p>
+                <div className="grid grid-cols-6 gap-2">
+                  {PRESET_COLORS.map((c) => (
+                    <button
+                      key={c.hex}
+                      onClick={() => {
+                        updateBoardItem(colorPickerTarget, {
+                          color: `bg-[${c.hex}]`,
+                        });
+                        setColorPickerTarget(null);
+                      }}
+                      className="w-10 h-10 rounded-full shadow-sm border border-black/20 hover:scale-110 transition-transform active:scale-95"
+                      style={{ backgroundColor: c.hex }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {state.settings.customColors?.length > 0 && (
+                <div className="mb-4">
+                  <p
+                    className={`text-[10px] uppercase font-bold tracking-widest mb-2 ${t.textMuted}`}
+                  >
+                    Custom
+                  </p>
+                  <div className="grid grid-cols-6 gap-2">
+                    {state.settings.customColors.map((hex, i) => (
+                      <button
+                        key={i}
+                        onClick={() => {
+                          updateBoardItem(colorPickerTarget, {
+                            color: `bg-[${hex}]`,
+                          });
+                          setColorPickerTarget(null);
+                        }}
+                        className="w-10 h-10 rounded-full shadow-sm border border-black/20 hover:scale-110 transition-transform active:scale-95"
+                        style={{ backgroundColor: hex }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <p
+                  className={`text-[10px] uppercase font-bold tracking-widest mb-2 ${t.textMuted}`}
+                >
+                  Add New Color
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="color"
+                    value={tempCustomColor}
+                    onChange={(e) => setTempCustomColor(e.target.value)}
+                    className="w-14 h-12 rounded-xl cursor-pointer bg-transparent border-none p-0"
+                  />
+                  <button
+                    onClick={() => {
+                      const newColors = [
+                        ...new Set([
+                          ...(state.settings.customColors || []),
+                          tempCustomColor,
+                        ]),
+                      ].slice(-12);
+                      dispatch({
+                        type: "UPDATE_SETTINGS",
+                        payload: { customColors: newColors },
+                      });
+                      updateBoardItem(colorPickerTarget, {
+                        color: `bg-[${tempCustomColor}]`,
+                      });
+                      setColorPickerTarget(null);
+                    }}
+                    className={`flex-1 font-bold rounded-xl flex items-center justify-center gap-2 border transition-all active:scale-95 ${t.input} hover:border-emerald-500`}
+                  >
+                    <Plus size={16} /> Save & Select
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showAddPropType && (
           <div
             className={`absolute inset-0 z-[400] flex items-center justify-center backdrop-blur-sm animate-in fade-in duration-200 p-4 ${t.modalOverlay}`}
@@ -1984,27 +2047,18 @@ export default function App() {
                 className={`border rounded-2xl p-4 flex flex-col gap-3 ${t.card}`}
               >
                 <div className="flex items-center gap-3">
-                  <div
-                    className={`w-8 h-8 rounded shrink-0 shadow-sm border border-black/10 flex items-center justify-center relative overflow-hidden`}
+                  <button
+                    onClick={() => setColorPickerTarget(idx)}
+                    className={`w-8 h-8 rounded shrink-0 shadow-sm border border-black/10 flex items-center justify-center hover:scale-105 active:scale-95 transition-transform overflow-hidden`}
                     style={{ backgroundColor: hexColor }}
                   >
-                    <input
-                      type="color"
-                      value={hexColor}
-                      onChange={(e) =>
-                        updateBoardItem(idx, {
-                          color: `bg-[${e.target.value}]`,
-                        })
-                      }
-                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                    />
                     {prop.icon &&
                       renderDynamicIcon(
                         prop.icon,
                         16,
                         "text-white relative z-10 pointer-events-none",
                       )}
-                  </div>
+                  </button>
                   <input
                     type="text"
                     value={prop.name}
@@ -2029,12 +2083,13 @@ export default function App() {
                     </span>
                     <input
                       type="number"
-                      value={prop.price === 0 ? "" : prop.price}
-                      onChange={(e) =>
+                      value={prop.price === "" ? "" : prop.price}
+                      onChange={(e) => {
+                        const val = e.target.value;
                         updateBoardItem(idx, {
-                          price: parseInt(e.target.value) || 0,
-                        })
-                      }
+                          price: val === "" ? "" : parseInt(val, 10),
+                        });
+                      }}
                       className={`w-full rounded-lg px-3 py-1.5 focus:outline-none border transition-colors ${t.input}`}
                     />
                   </div>
@@ -2048,12 +2103,13 @@ export default function App() {
                         </span>
                         <input
                           type="number"
-                          value={prop.build === 0 ? "" : prop.build}
-                          onChange={(e) =>
+                          value={prop.build === "" ? "" : prop.build}
+                          onChange={(e) => {
+                            const val = e.target.value;
                             updateBoardItem(idx, {
-                              build: parseInt(e.target.value) || 0,
-                            })
-                          }
+                              build: val === "" ? "" : parseInt(val, 10),
+                            });
+                          }}
                           className={`w-full rounded-lg px-3 py-1.5 focus:outline-none border transition-colors ${t.input}`}
                         />
                       </div>
@@ -2066,15 +2122,14 @@ export default function App() {
                         <input
                           type="number"
                           value={
-                            (prop.hotel ?? prop.build) === 0
-                              ? ""
-                              : (prop.hotel ?? prop.build)
+                            prop.hotel === "" ? "" : (prop.hotel ?? prop.build)
                           }
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const val = e.target.value;
                             updateBoardItem(idx, {
-                              hotel: parseInt(e.target.value) || 0,
-                            })
-                          }
+                              hotel: val === "" ? "" : parseInt(val, 10),
+                            });
+                          }}
                           className={`w-full rounded-lg px-3 py-1.5 focus:outline-none border transition-colors ${t.input}`}
                         />
                       </div>
@@ -2116,12 +2171,13 @@ export default function App() {
                     </span>
                     <input
                       type="number"
-                      value={prop.mort === 0 ? "" : prop.mort}
-                      onChange={(e) =>
+                      value={prop.mort === "" ? "" : prop.mort}
+                      onChange={(e) => {
+                        const val = e.target.value;
                         updateBoardItem(idx, {
-                          mort: parseInt(e.target.value) || 0,
-                        })
-                      }
+                          mort: val === "" ? "" : parseInt(val, 10),
+                        });
+                      }}
                       className={`w-full rounded-lg px-3 py-1.5 focus:outline-none border transition-colors ${t.input}`}
                     />
                   </div>
@@ -2217,41 +2273,7 @@ export default function App() {
               )}
             </div>
 
-            <div className="space-y-2 mb-6 min-h-[100px]">
-              {state.players.length === 0 ? (
-                <div
-                  className={`h-full flex items-center justify-center text-sm italic py-4 ${t.textFaint}`}
-                >
-                  Add players to begin...
-                </div>
-              ) : (
-                state.players.map((p) => (
-                  <div
-                    key={p.id}
-                    className={`flex items-center justify-between px-4 py-3 rounded-xl border animate-in slide-in-from-left-4 duration-300 ${t.modalHeader}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-3 h-3 rounded-full ${p.color.bg} shadow-sm ring-2 ${isDark ? "ring-neutral-950" : "ring-white"}`}
-                      ></div>
-                      <span className={`font-bold ${t.textMain}`}>
-                        {p.name}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() =>
-                        dispatch({ type: "REMOVE_PLAYER", payload: p.id })
-                      }
-                      className={`hover:text-rose-500 hover:scale-110 active:scale-95 transition-all p-1 ${t.textMuted}`}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="flex gap-2 relative">
+            <div className="flex gap-2 relative mb-4">
               <input
                 type="text"
                 placeholder="Enter player name..."
@@ -2287,6 +2309,40 @@ export default function App() {
               >
                 <Plus size={20} />
               </button>
+            </div>
+
+            <div className="space-y-2 min-h-[100px]">
+              {state.players.length === 0 ? (
+                <div
+                  className={`h-full flex items-center justify-center text-sm italic py-4 border border-dashed rounded-xl ${t.textFaint} ${t.border}`}
+                >
+                  Add players to begin...
+                </div>
+              ) : (
+                state.players.map((p) => (
+                  <div
+                    key={p.id}
+                    className={`flex items-center justify-between px-4 py-3 rounded-xl border animate-in slide-in-from-left-4 duration-300 ${t.modalHeader}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-3 h-3 rounded-full ${p.color.bg} shadow-sm ring-2 ${isDark ? "ring-neutral-950" : "ring-white"}`}
+                      ></div>
+                      <span className={`font-bold ${t.textMain}`}>
+                        {p.name}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() =>
+                        dispatch({ type: "REMOVE_PLAYER", payload: p.id })
+                      }
+                      className={`hover:text-rose-500 hover:scale-110 active:scale-95 transition-all p-1 ${t.textMuted}`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -2634,18 +2690,38 @@ export default function App() {
                 )}
 
                 {activeTab === "properties" && (
-                  <div className="p-4 space-y-6 animate-in fade-in duration-300">
-                    <div
-                      className={`border p-4 rounded-2xl flex items-center gap-3 transition-colors ${t.card}`}
-                    >
-                      <Info size={24} className="text-emerald-500 shrink-0" />
-                      <p className={`text-xs font-medium ${t.textMuted}`}>
-                        Tap a property to buy, build, mortgage, transfer, or
-                        execute hostile takeovers. The engine handles all math.
+                  <div className="p-4 animate-in fade-in duration-300">
+                    <div className="flex justify-between items-center mb-4">
+                      <p
+                        className={`text-[10px] font-bold uppercase tracking-widest ${t.textMuted}`}
+                      >
+                        Board Assets
                       </p>
+                      <div
+                        className={`flex items-center p-1 rounded-xl border ${t.modalHeader}`}
+                      >
+                        <button
+                          onClick={() => setAssetView("list")}
+                          className={`p-2 rounded-lg transition-all ${assetView === "list" ? `${t.card} shadow-sm` : "opacity-50 hover:opacity-100"}`}
+                        >
+                          <List size={16} />
+                        </button>
+                        <button
+                          onClick={() => setAssetView("grid")}
+                          className={`p-2 rounded-lg transition-all ${assetView === "grid" ? `${t.card} shadow-sm` : "opacity-50 hover:opacity-100"}`}
+                        >
+                          <LayoutGrid size={16} />
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="space-y-2">
+                    <div
+                      className={
+                        assetView === "grid"
+                          ? "grid grid-cols-2 gap-3 pb-6"
+                          : "space-y-2 pb-6"
+                      }
+                    >
                       {state.board.map((p) => {
                         const pState = state.propertyState[p.id] || {
                           ownerId: null,
@@ -2662,6 +2738,99 @@ export default function App() {
                           state.settings.housesBeforeHotel ?? 4;
                         const maxBuildings = housesBeforeHotel + 1;
 
+                        const hexColor = p.color.startsWith("bg-[")
+                          ? p.color.slice(4, -1)
+                          : "#888888";
+
+                        if (assetView === "grid") {
+                          return (
+                            <div
+                              key={p.id}
+                              onClick={() => setActivePropId(p.id)}
+                              className={`border rounded-xl flex flex-col cursor-pointer transition-all duration-200 active:scale-[0.98] overflow-hidden relative ${t.card} ${t.borderHover} ${pState.mortgaged ? "opacity-60" : ""}`}
+                            >
+                              <div
+                                className="h-8 w-full flex items-center justify-center shrink-0 border-b border-black/10 relative"
+                                style={
+                                  p.color.startsWith("bg-[")
+                                    ? { backgroundColor: hexColor }
+                                    : undefined
+                                }
+                              >
+                                {!p.color.startsWith("bg-[") && (
+                                  <div
+                                    className={`absolute inset-0 ${p.color}`}
+                                  />
+                                )}
+                                {p.icon &&
+                                  renderDynamicIcon(
+                                    p.icon,
+                                    14,
+                                    "text-white relative z-10",
+                                  )}
+                              </div>
+                              <div className="p-3 flex-1 flex flex-col justify-between gap-3">
+                                <span
+                                  className={`font-bold text-sm leading-tight block ${t.textMain}`}
+                                >
+                                  {p.name}
+                                </span>
+                                <div className="flex flex-col gap-2">
+                                  {owner ? (
+                                    <>
+                                      <div className="flex items-center gap-1.5">
+                                        <span
+                                          className={`w-2 h-2 rounded-full shrink-0 ${owner.color.bg}`}
+                                        />
+                                        <span
+                                          className={`text-[10px] font-bold truncate ${t.textMain}`}
+                                        >
+                                          {owner.name}
+                                        </span>
+                                      </div>
+                                      {p.type === "street" &&
+                                        pState.houses > 0 && (
+                                          <div className="flex gap-0.5">
+                                            {pState.houses === maxBuildings ? (
+                                              <Building
+                                                size={12}
+                                                className="text-rose-600 drop-shadow-md"
+                                                fill="currentColor"
+                                              />
+                                            ) : (
+                                              Array.from({
+                                                length: pState.houses,
+                                              }).map((_, i) => (
+                                                <Home
+                                                  key={i}
+                                                  size={12}
+                                                  className="text-emerald-500 drop-shadow-sm"
+                                                  fill="currentColor"
+                                                />
+                                              ))
+                                            )}
+                                          </div>
+                                        )}
+                                      {pState.mortgaged && (
+                                        <span className="text-[9px] font-black text-rose-500 uppercase tracking-widest">
+                                          Mortgaged
+                                        </span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span
+                                      className={`text-[10px] font-bold uppercase tracking-widest ${t.textFaint}`}
+                                    >
+                                      Bank • ${p.price}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // List View
                         return (
                           <div
                             key={p.id}
@@ -2673,7 +2842,7 @@ export default function App() {
                                 className="relative w-4 h-full min-h-[40px] flex items-center justify-center rounded-sm shrink-0 border border-black/10 shadow-sm overflow-hidden"
                                 style={
                                   p.color.startsWith("bg-[")
-                                    ? { backgroundColor: p.color.slice(4, -1) }
+                                    ? { backgroundColor: hexColor }
                                     : undefined
                                 }
                               >
@@ -2699,8 +2868,11 @@ export default function App() {
                                   {owner ? (
                                     <>
                                       <span
-                                        className={`text-[10px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md border ${owner.color.text} ${owner.color.border} ${t.modalHeader}`}
+                                        className={`text-[10px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md border flex items-center gap-1 ${owner.color.text} ${owner.color.border} ${t.modalHeader}`}
                                       >
+                                        <div
+                                          className={`w-1.5 h-1.5 rounded-full ${owner.color.bg}`}
+                                        />
                                         {owner.name}
                                       </span>
                                       {p.type === "street" &&
@@ -2708,7 +2880,7 @@ export default function App() {
                                           <div className="flex gap-0.5">
                                             {pState.houses === maxBuildings ? (
                                               <Building
-                                                size={16}
+                                                size={14}
                                                 className="text-rose-600 drop-shadow-md"
                                                 fill="currentColor"
                                               />
@@ -3056,15 +3228,16 @@ export default function App() {
                                     ? ""
                                     : state.settings.maxDebt
                                 }
-                                onChange={(e) =>
+                                onChange={(e) => {
+                                  const val = e.target.value;
                                   dispatch({
                                     type: "UPDATE_SETTINGS",
                                     payload: {
                                       maxDebt:
-                                        parseInt(e.target.value, 10) || 0,
+                                        val === "" ? "" : parseInt(val, 10),
                                     },
-                                  })
-                                }
+                                  });
+                                }}
                                 className={`bg-transparent font-black w-full focus:outline-none ${t.textMain}`}
                               />
                             </div>
@@ -3088,19 +3261,20 @@ export default function App() {
                         <input
                           type="number"
                           value={
-                            state.settings.unmortgageInterest === 0
+                            state.settings.unmortgageInterest === ""
                               ? ""
                               : state.settings.unmortgageInterest
                           }
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const val = e.target.value;
                             dispatch({
                               type: "UPDATE_SETTINGS",
                               payload: {
                                 unmortgageInterest:
-                                  parseInt(e.target.value, 10) || 0,
+                                  val === "" ? "" : parseInt(val, 10),
                               },
-                            })
-                          }
+                            });
+                          }}
                           className={`bg-transparent font-black w-full focus:outline-none ${t.textMain}`}
                         />
                         <span className="text-emerald-500 font-bold">%</span>
@@ -3136,7 +3310,7 @@ export default function App() {
                       <div className="flex justify-between items-center">
                         <div>
                           <p className={`font-bold ${t.textMain}`}>
-                            Version 6.1.0 (Beta)
+                            Version 6.2.0 (Beta)
                           </p>
                           <p className={`text-sm ${t.textMuted}`}>
                             Developed by Yousuf with AI
@@ -3594,19 +3768,13 @@ export default function App() {
                   cost = propConfirmAction.amount;
                 if (propConfirmAction.type === "UNMORTGAGE")
                   cost = unmortgageCost;
-                if (propConfirmAction.type === "HOSTILE_TAKEOVER")
-                  cost = propDef.price * 2;
 
                 const activePlayerToCheck =
-                  propConfirmAction.type === "HOSTILE_TAKEOVER"
+                  propConfirmAction.type === "BUY"
                     ? state.players.find(
                         (p) => p.id === propConfirmAction.playerId,
                       )
-                    : propConfirmAction.type === "BUY"
-                      ? state.players.find(
-                          (p) => p.id === propConfirmAction.playerId,
-                        )
-                      : owner;
+                    : owner;
 
                 if (cost > 0 && activePlayerToCheck.balance < cost) {
                   showToast(`Insufficient funds! Need $${cost}.`, "error");
@@ -3628,26 +3796,16 @@ export default function App() {
                   return;
                 }
 
-                if (propConfirmAction.type === "HOSTILE_TAKEOVER") {
-                  dispatch({
-                    type: "HOSTILE_TAKEOVER",
-                    payload: {
-                      propertyId: activePropId,
-                      buyerId: propConfirmAction.playerId,
-                    },
-                  });
-                } else {
-                  dispatch({
-                    type: "PROPERTY_ACTION",
-                    payload: {
-                      actionType: propConfirmAction.type,
-                      propertyId: activePropId,
-                      playerId: propConfirmAction.playerId,
-                      amount: propConfirmAction.amount,
-                      targetPlayerId: propConfirmAction.targetId,
-                    },
-                  });
-                }
+                dispatch({
+                  type: "PROPERTY_ACTION",
+                  payload: {
+                    actionType: propConfirmAction.type,
+                    propertyId: activePropId,
+                    playerId: propConfirmAction.playerId,
+                    amount: propConfirmAction.amount,
+                    targetPlayerId: propConfirmAction.targetId,
+                  },
+                });
               };
 
               return (
@@ -3677,8 +3835,6 @@ export default function App() {
                             `Unmortgage for $${propConfirmAction.amount}?`}
                           {propConfirmAction.type === "TRANSFER" &&
                             `Transfer ownership to selected player?`}
-                          {propConfirmAction.type === "HOSTILE_TAKEOVER" &&
-                            `Pay $${propConfirmAction.amount} to seize asset?`}
                         </p>
                         <div className="flex gap-3 w-full">
                           <button
@@ -3855,45 +4011,6 @@ export default function App() {
                               >
                                 Unmortgage (${unmortgageCost})
                               </button>
-
-                              <div
-                                className={`pt-4 border-t text-left ${t.border}`}
-                              >
-                                <label className="text-[10px] text-rose-500 font-black uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                                  <Swords size={12} /> Hostile Takeover (2x
-                                  Price)
-                                </label>
-                                <div className="grid grid-cols-2 gap-2">
-                                  {state.players
-                                    .filter(
-                                      (p) => p.id !== owner.id && !p.isBankrupt,
-                                    )
-                                    .map((p) => (
-                                      <button
-                                        key={p.id}
-                                        onClick={() =>
-                                          setPropConfirmAction({
-                                            type: "HOSTILE_TAKEOVER",
-                                            playerId: p.id,
-                                            amount: propDef.price * 2,
-                                          })
-                                        }
-                                        className="px-3 py-2 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 rounded-lg flex flex-col items-center justify-center gap-1 transition-all duration-200 active:scale-95"
-                                      >
-                                        <div className="flex items-center gap-1">
-                                          <span
-                                            className={`w-2 h-2 rounded-full ${p.color.bg}`}
-                                          ></span>
-                                          <span
-                                            className={`text-xs font-bold ${isDark ? "text-rose-300" : "text-rose-600"}`}
-                                          >
-                                            {p.name}
-                                          </span>
-                                        </div>
-                                      </button>
-                                    ))}
-                                </div>
-                              </div>
                             </div>
                           ) : (
                             <div className="space-y-3">
