@@ -1,4 +1,10 @@
-import React, { useReducer, useEffect, useState, useRef } from "react";
+import React, {
+  useReducer,
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+} from "react";
 import {
   Landmark,
   Users,
@@ -37,7 +43,73 @@ import {
   Share2,
   LayoutGrid,
   List,
+  BookOpen,
+  RefreshCcw,
+  Layers,
+  Wand2,
 } from "lucide-react";
+
+// ==========================================
+// SOUND ENGINE & HAPTICS (ZERO DEPENDENCY)
+// ==========================================
+let audioCtx = null;
+
+const playSoundEffect = (type, enabled) => {
+  if (!enabled) return;
+  try {
+    if (!audioCtx)
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+
+    if (type === "tap") {
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(600, now);
+      gain.gain.setValueAtTime(0.03, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+      osc.start(now);
+      osc.stop(now + 0.05);
+    } else if (type === "success") {
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(400, now);
+      osc.frequency.setValueAtTime(600, now + 0.1);
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } else if (type === "error") {
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(150, now);
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } else if (type === "flip") {
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(300, now);
+      osc.frequency.exponentialRampToValueAtTime(800, now + 0.1);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    }
+  } catch (e) {
+    // Fail silently if audio is blocked
+  }
+};
+
+const triggerHaptic = (pattern, enabled) => {
+  if (!enabled) return;
+  if (typeof window !== "undefined" && window.navigator?.vibrate) {
+    window.navigator.vibrate(pattern);
+  }
+};
 
 // ==========================================
 // PURE CSS CONFETTI COMPONENT
@@ -74,12 +146,7 @@ const Confetti = () => {
       ))}
       <style
         dangerouslySetInnerHTML={{
-          __html: `
-        @keyframes confettiFall {
-          0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
-          100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
-        }
-      `,
+          __html: `@keyframes confettiFall { 0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; } 100% { transform: translateY(110vh) rotate(720deg); opacity: 0; } }`,
         }}
       />
     </div>
@@ -137,6 +204,93 @@ const PRESET_COLORS = [
   { label: "Yellow", hex: "#eab308" },
   { label: "Blue", hex: "#3b82f6" },
   { label: "Cyan", hex: "#06b6d4" },
+];
+
+const DEFAULT_ACTION_CARDS = [
+  {
+    id: "ac1",
+    title: "Bank Error in Your Favor",
+    desc: "Collect $200 immediately.",
+    type: "reward",
+    icon: "Coins",
+  },
+  {
+    id: "ac2",
+    title: "Speeding Fine",
+    desc: "Pay $15 for speeding.",
+    type: "penalty",
+    icon: "Car",
+  },
+  {
+    id: "ac3",
+    title: "Go to Jail",
+    desc: "Go directly to Jail. Do not pass Go. Do not collect $200.",
+    type: "penalty",
+    icon: "AlertOctagon",
+  },
+  {
+    id: "ac4",
+    title: "Street Repairs",
+    desc: "Pay $40 per house and $115 per hotel you own.",
+    type: "penalty",
+    icon: "Building",
+  },
+  {
+    id: "ac5",
+    title: "Won Beauty Contest",
+    desc: "Collect $10 from the Bank.",
+    type: "reward",
+    icon: "Award",
+  },
+  {
+    id: "ac6",
+    title: "Chairman of the Board",
+    desc: "Pay each player $50.",
+    type: "penalty",
+    icon: "Users",
+  },
+  {
+    id: "ac7",
+    title: "Dividend",
+    desc: "The Bank pays you a dividend of $50.",
+    type: "reward",
+    icon: "TrendingUp",
+  },
+  {
+    id: "ac8",
+    title: "Advance to Go",
+    desc: "Advance directly to Go and collect $200.",
+    type: "reward",
+    icon: "ArrowRight",
+  },
+  {
+    id: "ac9",
+    title: "Tax Audit",
+    desc: "Pay $100 in unexpected taxes.",
+    type: "penalty",
+    icon: "TrendingDown",
+  },
+  {
+    id: "ac10",
+    title: "Inheritance",
+    desc: "You inherit $100.",
+    type: "reward",
+    icon: "Landmark",
+  },
+  {
+    id: "ac11",
+    title: "Elected Official",
+    desc: "Collect $50 from every player for campaign funds.",
+    type: "chaos",
+    icon: "Handshake",
+  },
+  {
+    id: "ac12",
+    title: "Chaos Magic",
+    desc: "Swap properties with a player of your choice (Value must be roughly equal).",
+    type: "chaos",
+    icon: "Zap",
+  },
 ];
 
 const DEFAULT_PROPERTIES = [
@@ -616,6 +770,8 @@ const INITIAL_STATE = {
   board: JSON.parse(JSON.stringify(DEFAULT_PROPERTIES)),
   propertyState: {},
   treasureBucket: 0,
+  actionDeck: [],
+  lastDrawnCard: null,
   settings: {
     startingBalance: 1500,
     enableDebt: true,
@@ -624,8 +780,12 @@ const INITIAL_STATE = {
     unmortgageInterest: 10,
     housesBeforeHotel: 4,
     enableTreasureBucket: true,
+    trueDeckMode: false,
+    enableSounds: true,
+    enableHaptics: true,
     theme: "dark",
     customColors: [],
+    deckConfig: JSON.parse(JSON.stringify(DEFAULT_ACTION_CARDS)),
   },
   setupError: null,
   pendingBmsAlert: null,
@@ -677,15 +837,22 @@ const doesGroupHaveHouses = (board, propState, propertyId) => {
 // ==========================================
 function gameReducer(state, action) {
   switch (action.type) {
-    case "LOAD_STATE":
+    case "LOAD_STATE": {
+      const loadedSettings = action.payload.settings || {};
+      if (!loadedSettings.deckConfig) {
+        loadedSettings.deckConfig = JSON.parse(
+          JSON.stringify(DEFAULT_ACTION_CARDS),
+        );
+      }
       return {
         ...INITIAL_STATE,
         ...action.payload,
         settings: {
           ...INITIAL_STATE.settings,
-          ...(action.payload.settings || {}),
+          ...loadedSettings,
         },
       };
+    }
 
     case "ADD_PLAYER": {
       const name = action.payload.name.trim();
@@ -736,6 +903,7 @@ function gameReducer(state, action) {
       return {
         ...state,
         phase: "playing",
+        actionDeck: state.settings.deckConfig.map((c) => c.id),
         history: [
           {
             id: generateId(),
@@ -1026,7 +1194,7 @@ function gameReducer(state, action) {
         } else if (actionType === "SELL_BUILD") {
           newPropState[propertyId] = { ...pState, houses: pState.houses - 1 };
           historyMsg =
-            pState.houses > (state.settings.housesBeforeHotel ?? 4)
+            pState.houses >= (state.settings.housesBeforeHotel ?? 4)
               ? `${pName} sold a Hotel on ${propDef.name}`
               : `${pName} sold a House on ${propDef.name}`;
         } else if (actionType === "MORTGAGE") {
@@ -1077,6 +1245,129 @@ function gameReducer(state, action) {
           },
           ...state.history,
         ],
+      };
+    }
+
+    case "DRAW_ACTION_CARD": {
+      const { playerId } = action.payload;
+      const p = state.players.find((x) => x.id === playerId);
+      if (!p) return state;
+
+      let currentDeck = state.actionDeck || [];
+      const isTrueDeck = state.settings.trueDeckMode;
+
+      if (currentDeck.length === 0) {
+        currentDeck = state.settings.deckConfig.map((c) => c.id);
+      }
+
+      // Fallback if deck is still somehow empty (e.g. all cards deleted in editor)
+      if (currentDeck.length === 0) return state;
+
+      const randomIndex = Math.floor(Math.random() * currentDeck.length);
+      const drawnCardId = currentDeck[randomIndex];
+      const drawnCardDef =
+        state.settings.deckConfig.find((c) => c.id === drawnCardId) ||
+        state.settings.deckConfig[0];
+
+      let newDeck = [...currentDeck];
+      if (isTrueDeck) {
+        newDeck.splice(randomIndex, 1);
+      }
+
+      let shuffleTriggered = false;
+      if (isTrueDeck && newDeck.length === 0) {
+        shuffleTriggered = true;
+        newDeck = state.settings.deckConfig.map((c) => c.id);
+      }
+
+      let newHistory = [
+        {
+          id: generateId(),
+          timestamp: Date.now(),
+          from: "SYSTEM",
+          to: playerId,
+          amount: 0,
+          type: "SYSTEM",
+          message: `${p.name} drew: ${drawnCardDef.title}`,
+        },
+        ...state.history,
+      ];
+
+      if (shuffleTriggered) {
+        newHistory = [
+          {
+            id: generateId(),
+            timestamp: Date.now(),
+            from: "SYSTEM",
+            to: "BANK",
+            amount: 0,
+            type: "SYSTEM",
+            message: `Action Deck Reshuffled`,
+          },
+          ...newHistory,
+        ];
+      }
+
+      return {
+        ...state,
+        actionDeck: newDeck,
+        lastDrawnCard: {
+          ...drawnCardDef,
+          drawnBy: p.name,
+          drawnById: p.id,
+          timestamp: Date.now(),
+        },
+        history: newHistory,
+      };
+    }
+
+    case "UPDATE_DECK_CARD": {
+      const { idx, updates } = action.payload;
+      const newDeckConfig = [...state.settings.deckConfig];
+      newDeckConfig[idx] = { ...newDeckConfig[idx], ...updates };
+      return {
+        ...state,
+        settings: { ...state.settings, deckConfig: newDeckConfig },
+        actionDeck: [], // force reshuffle on structural changes
+      };
+    }
+
+    case "ADD_DECK_CARD": {
+      const newDeckConfig = [
+        ...state.settings.deckConfig,
+        {
+          id: generateId(),
+          title: "New Action Card",
+          desc: "Rule description goes here.",
+          type: "reward",
+          icon: "BookOpen",
+        },
+      ];
+      return {
+        ...state,
+        settings: { ...state.settings, deckConfig: newDeckConfig },
+        actionDeck: [], // force reshuffle on structural changes
+      };
+    }
+
+    case "REMOVE_DECK_CARD": {
+      const newDeckConfig = [...state.settings.deckConfig];
+      newDeckConfig.splice(action.payload, 1);
+      return {
+        ...state,
+        settings: { ...state.settings, deckConfig: newDeckConfig },
+        actionDeck: [], // force reshuffle on structural changes
+      };
+    }
+
+    case "RESET_DECK_DEFAULTS": {
+      return {
+        ...state,
+        settings: {
+          ...state.settings,
+          deckConfig: JSON.parse(JSON.stringify(DEFAULT_ACTION_CARDS)),
+        },
+        actionDeck: [],
       };
     }
 
@@ -1148,7 +1439,25 @@ function gameReducer(state, action) {
 
 // Helper to render dynamic lucide icons
 const renderDynamicIcon = (iconName, size, className) => {
-  const IconComp = { Train, Zap, Droplet, Plane, Car, Ship }[iconName] || Train;
+  const IconComp =
+    {
+      Train,
+      Zap,
+      Droplet,
+      Plane,
+      Car,
+      Ship,
+      Coins,
+      AlertOctagon,
+      Building,
+      Award,
+      Users,
+      TrendingUp,
+      ArrowRight,
+      TrendingDown,
+      Landmark,
+      Handshake,
+    }[iconName] || BookOpen;
   return <IconComp size={size} className={className} />;
 };
 
@@ -1162,6 +1471,21 @@ export default function App() {
 
   const t = THEMES[state.settings.theme] || THEMES.dark;
   const isDark = t.isDark;
+
+  // Haptic/Audio wrappers mapped to settings
+  const doHaptic = useCallback(
+    (pattern = 40) => {
+      triggerHaptic(pattern, state.settings.enableHaptics !== false);
+    },
+    [state.settings.enableHaptics],
+  );
+
+  const doAudio = useCallback(
+    (type) => {
+      playSoundEffect(type, state.settings.enableSounds !== false);
+    },
+    [state.settings.enableSounds],
+  );
 
   // UI States
   const [modalConfig, setModalConfig] = useState(null);
@@ -1183,14 +1507,25 @@ export default function App() {
   const [isEditingBoard, setIsEditingBoard] = useState(false);
   const [boardResetConfirm, setBoardResetConfirm] = useState(false);
   const [showAddPropType, setShowAddPropType] = useState(false);
+
+  // Custom Color Picker logic
   const [colorPickerTarget, setColorPickerTarget] = useState(null);
   const [tempCustomColor, setTempCustomColor] = useState("#ffffff");
 
-  const [customBuyPrice, setCustomBuyPrice] = useState("0");
+  const [customBuyPrice, setCustomBuyPrice] = useState("");
   const [isEditingBuyPrice, setIsEditingBuyPrice] = useState(false);
+
+  // Deck Editor UI State
+  const [isEditingDeck, setIsEditingDeck] = useState(false);
+  const [deckResetConfirm, setDeckResetConfirm] = useState(false);
 
   // Trade Wizard State
   const [tradeWizard, setTradeWizard] = useState(null);
+
+  // Action Deck UI State
+  const [showDeckPlayerSelect, setShowDeckPlayerSelect] = useState(false);
+  const [cardFlipState, setCardFlipState] = useState(false);
+  const [visibleCardData, setVisibleCardData] = useState(null);
 
   const [endGameConfirm, setEndGameConfirm] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
@@ -1204,11 +1539,20 @@ export default function App() {
   const [tradeAlert, setTradeAlert] = useState(null);
 
   const prevHistoryLength = useRef(state.history.length);
+  const prevDrawnCardTimestamp = useRef(0);
   const [toast, setToast] = useState(null);
 
   const showToast = (msg, type = "success") => {
     setToast({ msg, type, id: Date.now() });
     setTimeout(() => setToast(null), 3000);
+    if (type === "success") {
+      doAudio("success");
+      doHaptic(40);
+    }
+    if (type === "error") {
+      doAudio("error");
+      doHaptic([50, 50, 50]);
+    }
   };
 
   useEffect(() => {
@@ -1248,13 +1592,14 @@ export default function App() {
     }
   }, [activePropId, state.board]);
 
-  // UI Side Effect: Listen for History Growth (Transaction Success)
+  // Listen for History Growth (Transaction Success)
   useEffect(() => {
     if (state.history.length > prevHistoryLength.current) {
       const lastTx = state.history[0];
-      // Do not duplicate generic transaction toasts if we already showed a specific confirmation
-      // However, history is a great single source of truth for toasts.
-      showToast(lastTx.message || "Transaction Complete", "success");
+      // Do not popup a toast for Action Card draws, they have a visual card representation
+      if (!lastTx.message.includes("drew:")) {
+        showToast(lastTx.message || "Transaction Complete", "success");
+      }
 
       setModalConfig(null);
       setActivePropId(null);
@@ -1269,7 +1614,7 @@ export default function App() {
     prevHistoryLength.current = state.history.length;
   }, [state.history.length]);
 
-  // UI Side Effect: Handle Full Screen Alerts
+  // Handle Full Screen Alerts
   useEffect(() => {
     if (
       state.pendingBmsAlert ||
@@ -1281,6 +1626,8 @@ export default function App() {
       if (state.pendingTradeAlert) setTradeAlert(state.pendingTradeAlert);
 
       dispatch({ type: "CLEAR_ALERTS" });
+      doAudio("success");
+      doHaptic([100, 50, 100, 50, 100]); // Celebration Haptic
 
       // Auto-dismiss after 5s if user hasn't clicked/tapped
       const timer = setTimeout(() => {
@@ -1294,7 +1641,27 @@ export default function App() {
     state.pendingBmsAlert,
     state.pendingJackpotAlert,
     state.pendingTradeAlert,
+    doAudio,
+    doHaptic,
   ]);
+
+  // Watch for new Action Card drawn to trigger flip animation
+  useEffect(() => {
+    if (
+      state.lastDrawnCard &&
+      state.lastDrawnCard.timestamp !== prevDrawnCardTimestamp.current
+    ) {
+      prevDrawnCardTimestamp.current = state.lastDrawnCard.timestamp;
+      setVisibleCardData(state.lastDrawnCard);
+
+      // Small delay to ensure render before animation triggers
+      setTimeout(() => {
+        doAudio("flip");
+        doHaptic(30);
+        setCardFlipState(true);
+      }, 50);
+    }
+  }, [state.lastDrawnCard, doAudio, doHaptic]);
 
   // Instant dismissal of celebration alerts via keyboard
   useEffect(() => {
@@ -1302,17 +1669,21 @@ export default function App() {
       if (bmsAlert) setBmsAlert(null);
       if (jackpotAlert) setJackpotAlert(null);
       if (tradeAlert) setTradeAlert(null);
+      if (cardFlipState) setCardFlipState(false);
     };
 
-    if (bmsAlert || jackpotAlert || tradeAlert) {
+    if (bmsAlert || jackpotAlert || tradeAlert || cardFlipState) {
       window.addEventListener("keydown", handleKeyDown);
     }
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [bmsAlert, jackpotAlert, tradeAlert]);
+  }, [bmsAlert, jackpotAlert, tradeAlert, cardFlipState]);
 
-  const triggerHaptic = () => {
-    if (typeof window !== "undefined" && window.navigator?.vibrate)
-      window.navigator.vibrate(40);
+  const clickHandler = (actionFn) => {
+    return (e) => {
+      doAudio("tap");
+      doHaptic(10);
+      actionFn(e);
+    };
   };
 
   const closeModals = () => {
@@ -1322,6 +1693,7 @@ export default function App() {
     setTradeWizard(null);
     setBankModal(false);
     setBucketModal(false);
+    setShowDeckPlayerSelect(false);
     setTxType("PAY_PLAYER");
     setTargetId("");
     setAmountStr("0");
@@ -1329,7 +1701,7 @@ export default function App() {
   };
 
   const handleNumpad = (val) => {
-    triggerHaptic();
+    doHaptic(10);
     if (val === "DEL")
       setAmountStr((prev) => (prev.length > 1 ? prev.slice(0, -1) : "0"));
     else if (val === "00")
@@ -1433,7 +1805,7 @@ export default function App() {
       );
       dlAnchorElem.click();
       URL.revokeObjectURL(url);
-      showToast("Game state exported!");
+      showToast("Game state exported!", "success");
     } catch (e) {
       showToast("Export failed.", "error");
     }
@@ -1448,7 +1820,7 @@ export default function App() {
         const json = JSON.parse(event.target.result);
         if (json && json.players && Array.isArray(json.players)) {
           dispatch({ type: "LOAD_STATE", payload: json });
-          showToast("Game state loaded successfully!");
+          showToast("Game state loaded successfully!", "success");
         } else {
           showToast("Invalid save file format.", "error");
         }
@@ -1509,6 +1881,10 @@ export default function App() {
     showToast("New property added", "success");
   };
 
+  const updateDeckItem = (idx, updates) => {
+    dispatch({ type: "UPDATE_DECK_CARD", payload: { idx, updates } });
+  };
+
   // ==========================================
   // VIEW: TRADE WIZARD
   // ==========================================
@@ -1556,13 +1932,13 @@ export default function App() {
                   .map((p) => (
                     <button
                       key={p.id}
-                      onClick={() =>
+                      onClick={clickHandler(() =>
                         setTradeWizard((prev) => ({
                           ...prev,
                           step: 2,
                           p2Id: p.id,
-                        }))
-                      }
+                        })),
+                      )}
                       className={`py-4 rounded-xl border flex flex-col items-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-95 ${t.card} ${t.borderHover}`}
                     >
                       <div
@@ -1719,7 +2095,7 @@ export default function App() {
               return (
                 <div
                   key={p.id}
-                  onClick={() => toggleTradeProp(p.id, isP1)}
+                  onClick={clickHandler(() => toggleTradeProp(p.id, isP1))}
                   className={`border rounded-xl p-2.5 flex justify-between items-center cursor-pointer transition-all duration-200 ${isSelected ? `border-${isP1 ? "sky" : "emerald"}-500 shadow-sm ${t.p2pTag}` : `${t.input} ${groupHasHouses ? "opacity-30" : ""}`}`}
                 >
                   <div className="flex items-center gap-2 truncate">
@@ -1794,12 +2170,170 @@ export default function App() {
 
           <div className={`p-4 border-t shrink-0 ${t.card}`}>
             <button
-              onClick={handleExecuteTrade}
+              onClick={clickHandler(handleExecuteTrade)}
               className="w-full py-4 bg-emerald-500 text-white font-black text-lg rounded-2xl shadow-lg shadow-emerald-500/30 hover:scale-[1.02] active:scale-95 transition-all duration-200 flex items-center justify-center gap-2"
             >
               <Check size={24} /> Execute Trade
             </button>
           </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ==========================================
+  // VIEW: DECK EDITOR (Rendered Outside Main Tree)
+  // ==========================================
+  const renderDeckEditor = () => {
+    return (
+      <div
+        className={`absolute inset-0 z-[300] flex flex-col animate-in slide-in-from-bottom-full duration-300 ease-out ${t.base}`}
+      >
+        {deckResetConfirm && (
+          <div
+            className={`absolute inset-0 z-[400] flex items-center justify-center backdrop-blur-sm animate-in fade-in duration-200 p-4 ${t.modalOverlay}`}
+          >
+            <div
+              className={`border border-rose-500/40 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 ease-out ${t.modalBg}`}
+            >
+              <div className="text-center mb-6">
+                <h2 className={`text-xl font-black mb-2 ${t.textMain}`}>
+                  Reset Deck?
+                </h2>
+                <p className={`text-sm ${t.textMuted}`}>
+                  This will wipe all custom cards. This cannot be undone.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={clickHandler(() => setDeckResetConfirm(false))}
+                  className={`flex-1 py-3 font-bold rounded-xl transition-all duration-200 active:scale-95 ${t.input}`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={clickHandler(() => {
+                    dispatch({ type: "RESET_DECK_DEFAULTS" });
+                    setDeckResetConfirm(false);
+                    showToast("Deck reset to defaults");
+                  })}
+                  className="flex-1 py-3 bg-rose-600 text-white font-black rounded-xl shadow-lg shadow-rose-600/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <header
+          className={`px-6 py-4 border-b flex justify-between items-center shrink-0 ${t.card}`}
+        >
+          <h2
+            className={`font-black text-lg flex items-center gap-2 ${t.textMain}`}
+          >
+            <Layers size={18} /> Edit Action Deck
+          </h2>
+          <button
+            onClick={clickHandler(() => setIsEditingDeck(false))}
+            className="px-4 py-2 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-500 hover:scale-[1.02] transition-all duration-200"
+          >
+            Done
+          </button>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-24">
+          <p className={`text-xs text-center mb-4 ${t.textMuted}`}>
+            Edits update the deck immediately.
+          </p>
+          <button
+            onClick={clickHandler(() => setDeckResetConfirm(true))}
+            className={`w-full py-3 border border-rose-500/50 text-rose-500 rounded-xl font-bold mb-4 hover:bg-rose-500/10 transition-colors`}
+          >
+            Reset to Defaults
+          </button>
+
+          {state.settings.deckConfig.map((card, idx) => (
+            <div
+              key={card.id}
+              className={`border rounded-2xl p-4 flex flex-col gap-3 ${t.card}`}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={`p-3 rounded-xl flex items-center justify-center shrink-0 ${card.type === "penalty" ? "bg-rose-500/20 text-rose-500" : card.type === "reward" ? "bg-emerald-500/20 text-emerald-500" : "bg-amber-500/20 text-amber-500"}`}
+                >
+                  {renderDynamicIcon(card.icon, 20, "")}
+                </div>
+                <div className="flex-1 space-y-2">
+                  <input
+                    type="text"
+                    value={card.title}
+                    placeholder="Card Title"
+                    onChange={(e) =>
+                      updateDeckItem(idx, { title: e.target.value })
+                    }
+                    className={`w-full rounded-lg px-3 py-2 font-bold focus:outline-none border transition-colors ${t.input}`}
+                  />
+                  <textarea
+                    value={card.desc}
+                    placeholder="Description"
+                    onChange={(e) =>
+                      updateDeckItem(idx, { desc: e.target.value })
+                    }
+                    className={`w-full rounded-lg px-3 py-2 focus:outline-none border transition-colors resize-none h-16 text-sm ${t.input}`}
+                  />
+                  <div className="flex gap-2">
+                    <select
+                      value={card.type}
+                      onChange={(e) =>
+                        updateDeckItem(idx, { type: e.target.value })
+                      }
+                      className={`flex-1 rounded-lg px-3 py-1.5 focus:outline-none border transition-colors text-xs font-bold uppercase tracking-widest ${t.input}`}
+                    >
+                      <option value="reward">Reward</option>
+                      <option value="penalty">Penalty</option>
+                      <option value="chaos">Chaos</option>
+                    </select>
+                    <select
+                      value={card.icon}
+                      onChange={(e) =>
+                        updateDeckItem(idx, { icon: e.target.value })
+                      }
+                      className={`flex-1 rounded-lg px-3 py-1.5 focus:outline-none border transition-colors text-xs font-bold uppercase tracking-widest ${t.input}`}
+                    >
+                      <option value="Coins">Coins</option>
+                      <option value="Award">Award</option>
+                      <option value="TrendingUp">Graph Up</option>
+                      <option value="ArrowRight">Arrow</option>
+                      <option value="Landmark">Bank</option>
+                      <option value="AlertOctagon">Alert</option>
+                      <option value="Building">Building</option>
+                      <option value="Car">Car</option>
+                      <option value="Users">Users</option>
+                      <option value="TrendingDown">Graph Down</option>
+                      <option value="Handshake">Handshake</option>
+                      <option value="Zap">Lightning</option>
+                    </select>
+                  </div>
+                </div>
+                <button
+                  onClick={clickHandler(() =>
+                    dispatch({ type: "REMOVE_DECK_CARD", payload: idx }),
+                  )}
+                  className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          <button
+            onClick={clickHandler(() => dispatch({ type: "ADD_DECK_CARD" }))}
+            className={`w-full py-4 border-2 border-dashed rounded-2xl font-bold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-95 ${t.textMuted} ${t.borderHover}`}
+          >
+            <Plus size={20} /> Add New Card
+          </button>
         </div>
       </div>
     );
@@ -1832,17 +2366,17 @@ export default function App() {
               </div>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setBoardResetConfirm(false)}
+                  onClick={clickHandler(() => setBoardResetConfirm(false))}
                   className={`flex-1 py-3 font-bold rounded-xl transition-all duration-200 active:scale-95 ${t.input}`}
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={clickHandler(() => {
                     dispatch({ type: "RESET_BOARD_DEFAULTS" });
                     setBoardResetConfirm(false);
                     showToast("Board reset to defaults");
-                  }}
+                  })}
                   className="flex-1 py-3 bg-rose-600 text-white font-black rounded-xl shadow-lg shadow-rose-600/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
                 >
                   Reset
@@ -1852,7 +2386,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Color Picker Overlay */}
+        {/* Robust Color Picker Overlay */}
         {colorPickerTarget !== null && (
           <div
             className={`absolute inset-0 z-[400] flex items-center justify-center backdrop-blur-sm animate-in fade-in duration-200 p-4 ${t.modalOverlay}`}
@@ -1865,7 +2399,7 @@ export default function App() {
                   Select Color
                 </h3>
                 <button
-                  onClick={() => setColorPickerTarget(null)}
+                  onClick={clickHandler(() => setColorPickerTarget(null))}
                   className={`p-2 rounded-full hover:bg-black/10 ${t.textMuted}`}
                 >
                   <X size={18} />
@@ -1882,12 +2416,12 @@ export default function App() {
                   {PRESET_COLORS.map((c) => (
                     <button
                       key={c.hex}
-                      onClick={() => {
+                      onClick={clickHandler(() => {
                         updateBoardItem(colorPickerTarget, {
                           color: `bg-[${c.hex}]`,
                         });
                         setColorPickerTarget(null);
-                      }}
+                      })}
                       className="w-10 h-10 rounded-full shadow-sm border border-black/20 hover:scale-110 transition-transform active:scale-95"
                       style={{ backgroundColor: c.hex }}
                     />
@@ -1906,12 +2440,12 @@ export default function App() {
                     {state.settings.customColors.map((hex, i) => (
                       <button
                         key={i}
-                        onClick={() => {
+                        onClick={clickHandler(() => {
                           updateBoardItem(colorPickerTarget, {
                             color: `bg-[${hex}]`,
                           });
                           setColorPickerTarget(null);
-                        }}
+                        })}
                         className="w-10 h-10 rounded-full shadow-sm border border-black/20 hover:scale-110 transition-transform active:scale-95"
                         style={{ backgroundColor: hex }}
                       />
@@ -1924,37 +2458,45 @@ export default function App() {
                 <p
                   className={`text-[10px] uppercase font-bold tracking-widest mb-2 ${t.textMuted}`}
                 >
-                  Add New Color
+                  Add New Hex Color
                 </p>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
+                  {/* Robust native color picker fallback */}
                   <input
                     type="color"
                     value={tempCustomColor}
                     onChange={(e) => setTempCustomColor(e.target.value)}
-                    className="w-14 h-12 rounded-xl cursor-pointer bg-transparent border-none p-0"
+                    className="w-12 h-12 rounded cursor-pointer shrink-0"
                   />
-                  <button
-                    onClick={() => {
-                      const newColors = [
-                        ...new Set([
-                          ...(state.settings.customColors || []),
-                          tempCustomColor,
-                        ]),
-                      ].slice(-12);
-                      dispatch({
-                        type: "UPDATE_SETTINGS",
-                        payload: { customColors: newColors },
-                      });
-                      updateBoardItem(colorPickerTarget, {
-                        color: `bg-[${tempCustomColor}]`,
-                      });
-                      setColorPickerTarget(null);
-                    }}
-                    className={`flex-1 font-bold rounded-xl flex items-center justify-center gap-2 border transition-all active:scale-95 ${t.input} hover:border-emerald-500`}
-                  >
-                    <Plus size={16} /> Save & Select
-                  </button>
+                  <input
+                    type="text"
+                    value={tempCustomColor}
+                    onChange={(e) => setTempCustomColor(e.target.value)}
+                    placeholder="#HexCode"
+                    className={`flex-1 font-bold rounded-xl px-3 py-3 border transition-colors focus:outline-none ${t.input}`}
+                  />
                 </div>
+                <button
+                  onClick={clickHandler(() => {
+                    const newColors = [
+                      ...new Set([
+                        ...(state.settings.customColors || []),
+                        tempCustomColor,
+                      ]),
+                    ].slice(-12);
+                    dispatch({
+                      type: "UPDATE_SETTINGS",
+                      payload: { customColors: newColors },
+                    });
+                    updateBoardItem(colorPickerTarget, {
+                      color: `bg-[${tempCustomColor}]`,
+                    });
+                    setColorPickerTarget(null);
+                  })}
+                  className="w-full mt-3 font-bold rounded-xl flex items-center justify-center gap-2 border transition-all active:scale-95 py-3 bg-emerald-500 text-white border-emerald-500 shadow-md"
+                >
+                  <Check size={16} /> Save & Select
+                </button>
               </div>
             </div>
           </div>
@@ -1974,34 +2516,34 @@ export default function App() {
               </h3>
               <div className="grid gap-3">
                 <button
-                  onClick={() => {
+                  onClick={clickHandler(() => {
                     addBoardItem("street");
                     setShowAddPropType(false);
-                  }}
+                  })}
                   className={`p-4 rounded-xl border font-bold transition-colors ${t.input} hover:border-emerald-500 text-left`}
                 >
                   🏡 Street (Buildable)
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={clickHandler(() => {
                     addBoardItem("railroad");
                     setShowAddPropType(false);
-                  }}
+                  })}
                   className={`p-4 rounded-xl border font-bold transition-colors ${t.input} hover:border-emerald-500 text-left`}
                 >
                   🚆 Railroad
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={clickHandler(() => {
                     addBoardItem("utility");
                     setShowAddPropType(false);
-                  }}
+                  })}
                   className={`p-4 rounded-xl border font-bold transition-colors ${t.input} hover:border-emerald-500 text-left`}
                 >
                   ⚡ Utility
                 </button>
                 <button
-                  onClick={() => setShowAddPropType(false)}
+                  onClick={clickHandler(() => setShowAddPropType(false))}
                   className={`p-4 rounded-xl border font-bold mt-2 transition-colors ${t.card} text-rose-500`}
                 >
                   Cancel
@@ -2020,7 +2562,7 @@ export default function App() {
             <Edit3 size={18} /> Edit Board Assets
           </h2>
           <button
-            onClick={() => setIsEditingBoard(false)}
+            onClick={clickHandler(() => setIsEditingBoard(false))}
             className="px-4 py-2 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-500 hover:scale-[1.02] transition-all duration-200"
           >
             Done
@@ -2031,7 +2573,7 @@ export default function App() {
             Changes save automatically and persist across new games.
           </p>
           <button
-            onClick={() => setBoardResetConfirm(true)}
+            onClick={clickHandler(() => setBoardResetConfirm(true))}
             className={`w-full py-3 border border-rose-500/50 text-rose-500 rounded-xl font-bold mb-4 hover:bg-rose-500/10 transition-colors`}
           >
             Reset to Defaults
@@ -2048,7 +2590,7 @@ export default function App() {
               >
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => setColorPickerTarget(idx)}
+                    onClick={clickHandler(() => setColorPickerTarget(idx))}
                     className={`w-8 h-8 rounded shrink-0 shadow-sm border border-black/10 flex items-center justify-center hover:scale-105 active:scale-95 transition-transform overflow-hidden`}
                     style={{ backgroundColor: hexColor }}
                   >
@@ -2068,7 +2610,7 @@ export default function App() {
                     className={`flex-1 rounded-lg px-3 py-2 font-bold focus:outline-none border transition-colors ${t.input}`}
                   />
                   <button
-                    onClick={() => removeBoardItem(idx)}
+                    onClick={clickHandler(() => removeBoardItem(idx))}
                     className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
                   >
                     <Trash2 size={18} />
@@ -2187,7 +2729,7 @@ export default function App() {
           })}
 
           <button
-            onClick={() => setShowAddPropType(true)}
+            onClick={clickHandler(() => setShowAddPropType(true))}
             className={`w-full py-4 border-2 border-dashed rounded-2xl font-bold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-95 ${t.textMuted} ${t.borderHover}`}
           >
             <Plus size={20} /> Add New Property
@@ -2199,14 +2741,14 @@ export default function App() {
 
   const renderSetup = () => (
     <div className="flex-1 flex flex-col h-full relative">
-      <div className="absolute top-6 right-6 z-10">
+      <div className="absolute top-6 right-6 z-10 flex gap-2">
         <button
-          onClick={() =>
+          onClick={clickHandler(() =>
             dispatch({
               type: "UPDATE_SETTINGS",
               payload: { theme: isDark ? "light" : "dark" },
-            })
-          }
+            }),
+          )}
           className={`p-3 rounded-full border ${t.card} ${t.textMuted} hover:${t.textMain} hover:scale-[1.05] active:scale-95 transition-all duration-200`}
         >
           {isDark ? <Sun size={20} /> : <Moon size={20} />}
@@ -2284,6 +2826,8 @@ export default function App() {
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && newPlayerName.trim()) {
+                    doAudio("tap");
+                    doHaptic(10);
                     dispatch({
                       type: "ADD_PLAYER",
                       payload: { name: newPlayerName },
@@ -2295,7 +2839,7 @@ export default function App() {
                 className={`w-full border rounded-xl px-4 py-3 focus:outline-none disabled:opacity-50 transition-colors ${t.input}`}
               />
               <button
-                onClick={() => {
+                onClick={clickHandler(() => {
                   if (newPlayerName.trim()) {
                     dispatch({
                       type: "ADD_PLAYER",
@@ -2303,7 +2847,7 @@ export default function App() {
                     });
                     setNewPlayerName("");
                   }
-                }}
+                })}
                 disabled={state.players.length >= 6 || !newPlayerName.trim()}
                 className="bg-emerald-600 text-white px-4 rounded-xl font-bold hover:bg-emerald-500 hover:scale-[1.05] active:scale-95 disabled:opacity-50 disabled:hover:scale-100 transition-all duration-200"
               >
@@ -2333,9 +2877,9 @@ export default function App() {
                       </span>
                     </div>
                     <button
-                      onClick={() =>
-                        dispatch({ type: "REMOVE_PLAYER", payload: p.id })
-                      }
+                      onClick={clickHandler(() =>
+                        dispatch({ type: "REMOVE_PLAYER", payload: p.id }),
+                      )}
                       className={`hover:text-rose-500 hover:scale-110 active:scale-95 transition-all p-1 ${t.textMuted}`}
                     >
                       <Trash2 size={16} />
@@ -2350,7 +2894,7 @@ export default function App() {
 
       <div className={`shrink-0 p-6 pt-2 space-y-3 relative z-10 ${t.base}`}>
         <button
-          onClick={() => dispatch({ type: "START_GAME" })}
+          onClick={clickHandler(() => dispatch({ type: "START_GAME" }))}
           disabled={state.players.length < 2}
           className={`w-full py-4 rounded-2xl font-black text-lg hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:opacity-20 flex items-center justify-center gap-2 ${isDark ? "bg-white text-black hover:bg-neutral-200" : "bg-slate-900 text-white hover:bg-slate-800 shadow-md"}`}
         >
@@ -2358,7 +2902,7 @@ export default function App() {
         </button>
         <div className="grid grid-cols-2 gap-3">
           <button
-            onClick={() => setIsEditingBoard(true)}
+            onClick={clickHandler(() => setIsEditingBoard(true))}
             className={`border py-3 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-95 ${t.card} ${t.textMuted} ${t.borderHover}`}
           >
             <Edit3 size={16} /> Edit Board
@@ -2427,13 +2971,13 @@ export default function App() {
       if (navigator.share) {
         try {
           await navigator.share({ title: "BMS Results", text });
-          showToast("Results shared!");
+          showToast("Results shared!", "success");
         } catch (e) {
           // Fallback if sharing is aborted or fails
         }
       } else {
         navigator.clipboard.writeText(text);
-        showToast("Results copied to clipboard!");
+        showToast("Results copied to clipboard!", "success");
       }
     };
 
@@ -2496,13 +3040,13 @@ export default function App() {
 
         <div className="shrink-0 max-w-md mx-auto w-full space-y-3 relative z-10 pb-4 pt-4">
           <button
-            onClick={handleShareResults}
+            onClick={clickHandler(handleShareResults)}
             className={`w-full py-3 rounded-2xl font-bold text-lg hover:scale-[1.02] active:scale-95 transition-all duration-200 border flex items-center justify-center gap-2 ${t.card} ${t.textMain} ${t.borderHover}`}
           >
             <Share2 size={20} /> Share Results
           </button>
           <button
-            onClick={() => dispatch({ type: "RESET_GAME" })}
+            onClick={clickHandler(() => dispatch({ type: "RESET_GAME" }))}
             className={`w-full py-4 rounded-2xl font-black text-lg hover:scale-[1.02] active:scale-95 transition-all duration-200 ${isDark ? "bg-white text-black hover:bg-neutral-200" : "bg-slate-900 text-white hover:bg-slate-800 shadow-md"}`}
           >
             Start New Game
@@ -2551,7 +3095,7 @@ export default function App() {
                       className={`grid ${state.settings.enableTreasureBucket !== false ? "grid-cols-2" : "grid-cols-1"} gap-3`}
                     >
                       <button
-                        onClick={() => setBankModal(true)}
+                        onClick={clickHandler(() => setBankModal(true))}
                         className={`w-full border rounded-3xl p-5 relative overflow-hidden text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${t.bankGradient} hover:border-emerald-500/50`}
                       >
                         <div
@@ -2580,7 +3124,7 @@ export default function App() {
 
                       {state.settings.enableTreasureBucket !== false && (
                         <button
-                          onClick={() => setBucketModal(true)}
+                          onClick={clickHandler(() => setBucketModal(true))}
                           className={`w-full border rounded-3xl p-5 relative overflow-hidden text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${t.card} hover:border-amber-500/50`}
                         >
                           <div
@@ -2617,7 +3161,7 @@ export default function App() {
                         return (
                           <button
                             key={p.id}
-                            onClick={() => {
+                            onClick={clickHandler(() => {
                               if (!p.isBankrupt) {
                                 setModalConfig({ activePlayerId: p.id });
                                 setTargetId(
@@ -2627,7 +3171,7 @@ export default function App() {
                                   )?.id || "",
                                 );
                               }
-                            }}
+                            })}
                             className={`text-left relative overflow-hidden rounded-3xl p-5 border transition-all duration-200 active:scale-[0.97]
                                 ${p.isBankrupt ? `opacity-60 grayscale bg-neutral-500/10 ${t.border}` : `${t.card} ${t.borderHover}`}`}
                           >
@@ -2701,13 +3245,13 @@ export default function App() {
                         className={`flex items-center p-1 rounded-xl border ${t.modalHeader}`}
                       >
                         <button
-                          onClick={() => setAssetView("list")}
+                          onClick={clickHandler(() => setAssetView("list"))}
                           className={`p-2 rounded-lg transition-all ${assetView === "list" ? `${t.card} shadow-sm` : "opacity-50 hover:opacity-100"}`}
                         >
                           <List size={16} />
                         </button>
                         <button
-                          onClick={() => setAssetView("grid")}
+                          onClick={clickHandler(() => setAssetView("grid"))}
                           className={`p-2 rounded-lg transition-all ${assetView === "grid" ? `${t.card} shadow-sm` : "opacity-50 hover:opacity-100"}`}
                         >
                           <LayoutGrid size={16} />
@@ -2746,7 +3290,9 @@ export default function App() {
                           return (
                             <div
                               key={p.id}
-                              onClick={() => setActivePropId(p.id)}
+                              onClick={clickHandler(() =>
+                                setActivePropId(p.id),
+                              )}
                               className={`border rounded-xl flex flex-col cursor-pointer transition-all duration-200 active:scale-[0.98] overflow-hidden relative ${t.card} ${t.borderHover} ${pState.mortgaged ? "opacity-60" : ""}`}
                             >
                               <div
@@ -2834,7 +3380,7 @@ export default function App() {
                         return (
                           <div
                             key={p.id}
-                            onClick={() => setActivePropId(p.id)}
+                            onClick={clickHandler(() => setActivePropId(p.id))}
                             className={`border rounded-xl p-3 flex justify-between items-center cursor-pointer transition-all duration-200 active:scale-[0.98] relative overflow-hidden ${t.card} ${t.borderHover} ${pState.mortgaged ? "opacity-60" : ""}`}
                           >
                             <div className="flex items-center gap-3 relative z-10 w-full">
@@ -2918,6 +3464,157 @@ export default function App() {
                         );
                       })}
                     </div>
+                  </div>
+                )}
+
+                {/* NEW ACTION CARDS TAB */}
+                {activeTab === "cards" && (
+                  <div className="p-6 flex flex-col items-center justify-center h-full animate-in fade-in duration-300">
+                    <div className="absolute top-6 right-6">
+                      <button
+                        onClick={clickHandler(() => setIsEditingDeck(true))}
+                        className={`p-2 rounded-xl border flex items-center gap-2 font-bold transition-colors text-xs uppercase tracking-widest ${t.card} ${t.textMuted} hover:${t.textMain} hover:border-emerald-500/50`}
+                      >
+                        <Settings size={14} /> Edit Deck
+                      </button>
+                    </div>
+
+                    <div className="text-center mb-8 mt-4">
+                      <h2
+                        className={`text-2xl font-black uppercase tracking-tighter flex items-center justify-center gap-2 ${t.textMain}`}
+                      >
+                        <Wand2 size={24} className="text-emerald-500" /> Action
+                        Deck
+                      </h2>
+                      <p
+                        className={`text-xs uppercase tracking-widest font-bold mt-1 ${t.textMuted}`}
+                      >
+                        {state.settings.trueDeckMode
+                          ? `True Deck Mode (${state.actionDeck?.length || 0} left)`
+                          : "Infinite Deck Mode"}
+                      </p>
+                    </div>
+
+                    <div className="relative w-64 h-96 perspective-1000 group">
+                      <div
+                        className={`w-full h-full preserve-3d transition-transform duration-[800ms] ease-[cubic-bezier(0.175,0.885,0.32,1.275)] ${cardFlipState ? "rotate-y-180" : ""}`}
+                      >
+                        {/* CARD BACK */}
+                        <button
+                          onClick={() => {
+                            if (!cardFlipState) {
+                              doAudio("tap");
+                              doHaptic(10);
+                              setShowDeckPlayerSelect(true);
+                            }
+                          }}
+                          className={`absolute inset-0 backface-hidden w-full h-full rounded-3xl border-4 shadow-2xl flex flex-col items-center justify-center cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 z-10 ${isDark ? "bg-neutral-900 border-emerald-500/50" : "bg-slate-900 border-emerald-500"}`}
+                        >
+                          <div className="absolute inset-4 rounded-2xl border-2 border-dashed border-white/20"></div>
+                          <BookOpen
+                            size={48}
+                            className="text-emerald-500 mb-4"
+                          />
+                          <span className="text-white font-black text-2xl tracking-widest uppercase">
+                            Draw
+                          </span>
+                        </button>
+
+                        {/* CARD FRONT */}
+                        <div
+                          className={`absolute inset-0 backface-hidden rotate-y-180 w-full h-full rounded-3xl border shadow-2xl flex flex-col items-center text-center p-6 bg-white border-slate-200
+                          ${visibleCardData?.type === "penalty" ? "shadow-[0_0_50px_rgba(225,29,72,0.6)]" : visibleCardData?.type === "reward" ? "shadow-[0_0_50px_rgba(16,185,129,0.6)]" : "shadow-xl"}
+                        `}
+                        >
+                          {visibleCardData?.type === "reward" && <Confetti />}
+                          <div
+                            className={`w-full h-2 rounded-full mb-6 ${visibleCardData?.type === "penalty" ? "bg-rose-500" : visibleCardData?.type === "reward" ? "bg-emerald-500" : "bg-amber-500"}`}
+                          />
+
+                          <div
+                            className={`p-4 rounded-full mb-4 ${visibleCardData?.type === "penalty" ? "bg-rose-100 text-rose-600" : visibleCardData?.type === "reward" ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-600"}`}
+                          >
+                            {visibleCardData?.icon &&
+                              renderDynamicIcon(visibleCardData.icon, 32, "")}
+                          </div>
+
+                          <h3 className="text-2xl font-black text-slate-900 leading-tight mb-2">
+                            {visibleCardData?.title}
+                          </h3>
+                          <p className="text-slate-600 font-medium text-sm mb-auto">
+                            {visibleCardData?.desc}
+                          </p>
+
+                          <div className="w-full pt-4 mt-4 border-t border-slate-200 flex flex-col gap-1 relative z-20">
+                            <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">
+                              Drawn By
+                            </span>
+                            <span className="text-sm font-black text-slate-900">
+                              {visibleCardData?.drawnBy}
+                            </span>
+                          </div>
+
+                          <button
+                            onClick={clickHandler((e) => {
+                              e.stopPropagation();
+                              setCardFlipState(false);
+                            })}
+                            className="absolute -bottom-16 left-1/2 -translate-x-1/2 flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-black/50 backdrop-blur-md text-white text-xs font-bold whitespace-nowrap hover:bg-black/70 active:scale-95 transition-all"
+                          >
+                            <RefreshCcw size={14} /> Discard & Reset
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* SELECT PLAYER TO DRAW OVERLAY */}
+                    {showDeckPlayerSelect && (
+                      <div
+                        className={`absolute inset-0 z-[400] flex items-center justify-center backdrop-blur-sm animate-in fade-in duration-200 p-4 ${t.modalOverlay}`}
+                      >
+                        <div
+                          className={`border rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 ease-out ${t.modalBg}`}
+                        >
+                          <div className="flex justify-between items-center mb-4">
+                            <h3 className={`text-xl font-black ${t.textMain}`}>
+                              Who is drawing?
+                            </h3>
+                            <button
+                              onClick={clickHandler(() =>
+                                setShowDeckPlayerSelect(false),
+                              )}
+                              className={`p-2 rounded-full hover:bg-black/10 ${t.textMuted}`}
+                            >
+                              <X size={18} />
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {state.players
+                              .filter((p) => !p.isBankrupt)
+                              .map((p) => (
+                                <button
+                                  key={p.id}
+                                  onClick={clickHandler(() => {
+                                    setShowDeckPlayerSelect(false);
+                                    dispatch({
+                                      type: "DRAW_ACTION_CARD",
+                                      payload: { playerId: p.id },
+                                    });
+                                  })}
+                                  className={`px-4 py-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all duration-200 active:scale-95 ${t.input} ${t.borderHover}`}
+                                >
+                                  <span
+                                    className={`w-3 h-3 rounded-full ${p.color.bg}`}
+                                  ></span>
+                                  <span className={`font-bold ${t.textMain}`}>
+                                    {p.name}
+                                  </span>
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -3049,81 +3746,167 @@ export default function App() {
                       </p>
                       <div className="flex overflow-x-auto gap-2 pb-2 hide-scrollbar">
                         <button
-                          onClick={() =>
+                          onClick={clickHandler(() =>
                             dispatch({
                               type: "UPDATE_SETTINGS",
                               payload: { theme: "dark" },
-                            })
-                          }
+                            }),
+                          )}
                           className={`flex-shrink-0 px-4 py-2.5 rounded-xl font-bold border transition-all duration-200 active:scale-95 ${state.settings.theme === "dark" ? "border-emerald-500 ring-1 ring-emerald-500 text-white bg-neutral-800" : t.input}`}
                         >
                           Dark
                         </button>
                         <button
-                          onClick={() =>
+                          onClick={clickHandler(() =>
                             dispatch({
                               type: "UPDATE_SETTINGS",
                               payload: { theme: "light" },
-                            })
-                          }
+                            }),
+                          )}
                           className={`flex-shrink-0 px-4 py-2.5 rounded-xl font-bold border transition-all duration-200 active:scale-95 ${state.settings.theme === "light" ? "border-emerald-500 ring-1 ring-emerald-500 text-slate-900 bg-white" : t.input}`}
                         >
                           Light
                         </button>
                         <button
-                          onClick={() =>
+                          onClick={clickHandler(() =>
                             dispatch({
                               type: "UPDATE_SETTINGS",
                               payload: { theme: "midnight" },
-                            })
-                          }
+                            }),
+                          )}
                           className={`flex-shrink-0 px-4 py-2.5 rounded-xl font-bold border transition-all duration-200 active:scale-95 ${state.settings.theme === "midnight" ? "border-emerald-500 ring-1 ring-emerald-500 text-slate-100 bg-[#1e293b]" : t.input}`}
                         >
                           Midnight
                         </button>
                         <button
-                          onClick={() =>
+                          onClick={clickHandler(() =>
                             dispatch({
                               type: "UPDATE_SETTINGS",
                               payload: { theme: "coffee" },
-                            })
-                          }
+                            }),
+                          )}
                           className={`flex-shrink-0 px-4 py-2.5 rounded-xl font-bold border transition-all duration-200 active:scale-95 ${state.settings.theme === "coffee" ? "border-emerald-500 ring-1 ring-emerald-500 text-[#fafaf9] bg-[#44403c]" : t.input}`}
                         >
                           Coffee
                         </button>
                         <button
-                          onClick={() =>
+                          onClick={clickHandler(() =>
                             dispatch({
                               type: "UPDATE_SETTINGS",
                               payload: { theme: "ocean" },
-                            })
-                          }
+                            }),
+                          )}
                           className={`flex-shrink-0 px-4 py-2.5 rounded-xl font-bold border transition-all duration-200 active:scale-95 ${state.settings.theme === "ocean" ? "border-emerald-500 ring-1 ring-emerald-500 text-sky-50 bg-[#0c4a6e]" : t.input}`}
                         >
                           Ocean
                         </button>
                         <button
-                          onClick={() =>
+                          onClick={clickHandler(() =>
                             dispatch({
                               type: "UPDATE_SETTINGS",
                               payload: { theme: "forest" },
-                            })
-                          }
+                            }),
+                          )}
                           className={`flex-shrink-0 px-4 py-2.5 rounded-xl font-bold border transition-all duration-200 active:scale-95 ${state.settings.theme === "forest" ? "border-emerald-500 ring-1 ring-emerald-500 text-emerald-50 bg-[#065f46]" : t.input}`}
                         >
                           Forest
                         </button>
                         <button
-                          onClick={() =>
+                          onClick={clickHandler(() =>
                             dispatch({
                               type: "UPDATE_SETTINGS",
                               payload: { theme: "cyberpunk" },
-                            })
-                          }
+                            }),
+                          )}
                           className={`flex-shrink-0 px-4 py-2.5 rounded-xl font-bold border transition-all duration-200 active:scale-95 ${state.settings.theme === "cyberpunk" ? "border-emerald-500 ring-1 ring-emerald-500 text-[#fdf4ff] bg-[#27272a]" : t.input}`}
                         >
                           Cyberpunk
+                        </button>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`border rounded-3xl p-6 transition-colors space-y-4 ${t.card}`}
+                    >
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <h3 className={`font-bold ${t.textMain}`}>
+                            Sound Effects
+                          </h3>
+                        </div>
+                        <button
+                          onClick={clickHandler(() =>
+                            dispatch({
+                              type: "UPDATE_SETTINGS",
+                              payload: {
+                                enableSounds:
+                                  state.settings.enableSounds === false
+                                    ? true
+                                    : false,
+                              },
+                            }),
+                          )}
+                          className={`w-12 h-6 rounded-full transition-colors relative ${state.settings.enableSounds !== false ? "bg-emerald-500" : isDark ? "bg-neutral-700" : "bg-slate-300"}`}
+                        >
+                          <div
+                            className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${state.settings.enableSounds !== false ? "translate-x-6" : "translate-x-0"}`}
+                          />
+                        </button>
+                      </div>
+                      <div className="flex justify-between items-center pt-4 border-t border-black/10">
+                        <div>
+                          <h3 className={`font-bold ${t.textMain}`}>
+                            Haptic Feedback
+                          </h3>
+                        </div>
+                        <button
+                          onClick={() =>
+                            dispatch({
+                              type: "UPDATE_SETTINGS",
+                              payload: {
+                                enableHaptics:
+                                  state.settings.enableHaptics === false
+                                    ? true
+                                    : false,
+                              },
+                            })
+                          }
+                          className={`w-12 h-6 rounded-full transition-colors relative ${state.settings.enableHaptics !== false ? "bg-emerald-500" : isDark ? "bg-neutral-700" : "bg-slate-300"}`}
+                        >
+                          <div
+                            className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${state.settings.enableHaptics !== false ? "translate-x-6" : "translate-x-0"}`}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`border rounded-3xl p-6 transition-colors ${t.card}`}
+                    >
+                      <div className="flex justify-between items-center mb-4">
+                        <div>
+                          <h3 className={`font-bold ${t.textMain}`}>
+                            Action Deck System
+                          </h3>
+                          <p className={`text-xs ${t.textMuted}`}>
+                            Use True Deck behavior (Finite cards, no repeats
+                            until reshuffled).
+                          </p>
+                        </div>
+                        <button
+                          onClick={clickHandler(() =>
+                            dispatch({
+                              type: "UPDATE_SETTINGS",
+                              payload: {
+                                trueDeckMode: !state.settings.trueDeckMode,
+                              },
+                            }),
+                          )}
+                          className={`w-12 h-6 rounded-full transition-colors relative ${state.settings.trueDeckMode ? "bg-emerald-500" : isDark ? "bg-neutral-700" : "bg-slate-300"}`}
+                        >
+                          <div
+                            className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${state.settings.trueDeckMode ? "translate-x-6" : "translate-x-0"}`}
+                          />
                         </button>
                       </div>
                     </div>
@@ -3175,14 +3958,14 @@ export default function App() {
                           </p>
                         </div>
                         <button
-                          onClick={() =>
+                          onClick={clickHandler(() =>
                             dispatch({
                               type: "UPDATE_SETTINGS",
                               payload: {
                                 enableDebt: !state.settings.enableDebt,
                               },
-                            })
-                          }
+                            }),
+                          )}
                           className={`w-12 h-6 rounded-full transition-colors relative ${state.settings.enableDebt ? "bg-emerald-500" : isDark ? "bg-neutral-700" : "bg-slate-300"}`}
                         >
                           <div
@@ -3200,15 +3983,15 @@ export default function App() {
                               Custom Debt Limit
                             </span>
                             <button
-                              onClick={() =>
+                              onClick={clickHandler(() =>
                                 dispatch({
                                   type: "UPDATE_SETTINGS",
                                   payload: {
                                     enableDebtLimit:
                                       !state.settings.enableDebtLimit,
                                   },
-                                })
-                              }
+                                }),
+                              )}
                               className={`w-10 h-5 rounded-full transition-colors relative ${state.settings.enableDebtLimit ? "bg-sky-500" : isDark ? "bg-neutral-700" : "bg-slate-300"}`}
                             >
                               <div
@@ -3261,7 +4044,7 @@ export default function App() {
                         <input
                           type="number"
                           value={
-                            state.settings.unmortgageInterest === ""
+                            state.settings.unmortgageInterest === 0
                               ? ""
                               : state.settings.unmortgageInterest
                           }
@@ -3283,14 +4066,14 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <button
-                        onClick={() => setIsEditingBoard(true)}
+                        onClick={clickHandler(() => setIsEditingBoard(true))}
                         className={`border font-bold py-4 rounded-3xl transition-all duration-200 hover:scale-[1.02] active:scale-95 flex flex-col items-center justify-center gap-2 ${t.card} ${t.textMain} ${t.borderHover}`}
                       >
                         <Edit3 size={24} className="text-sky-500" /> Customize
                         Board
                       </button>
                       <button
-                        onClick={handleExport}
+                        onClick={clickHandler(handleExport)}
                         className={`border font-bold py-4 rounded-3xl transition-all duration-200 hover:scale-[1.02] active:scale-95 flex flex-col items-center justify-center gap-2 ${t.card} ${t.textMain} ${t.borderHover}`}
                       >
                         <Upload size={24} className="text-emerald-500" /> Export
@@ -3310,7 +4093,7 @@ export default function App() {
                       <div className="flex justify-between items-center">
                         <div>
                           <p className={`font-bold ${t.textMain}`}>
-                            Version 6.2.0 (Beta)
+                            Version 6.5.0 (Beta)
                           </p>
                           <p className={`text-sm ${t.textMuted}`}>
                             Developed by Yousuf with AI
@@ -3332,13 +4115,13 @@ export default function App() {
                         <AlertOctagon size={18} /> Danger Zone
                       </h3>
                       <button
-                        onClick={() => setEndGameConfirm(true)}
+                        onClick={clickHandler(() => setEndGameConfirm(true))}
                         className="w-full bg-amber-500 text-white font-bold py-3 rounded-xl shadow-lg shadow-amber-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all mb-3"
                       >
                         End Game & Rank Players
                       </button>
                       <button
-                        onClick={() => setResetConfirm(true)}
+                        onClick={clickHandler(() => setResetConfirm(true))}
                         className="w-full bg-rose-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-rose-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
                       >
                         Reset App
@@ -3349,17 +4132,18 @@ export default function App() {
               </main>
 
               <nav
-                className={`absolute bottom-0 w-full z-20 pb-safe transition-colors duration-300 backdrop-blur-xl border-t px-6 py-4 flex justify-between items-center shrink-0 ${t.nav}`}
+                className={`absolute bottom-0 w-full z-20 pb-safe transition-colors duration-300 backdrop-blur-xl border-t px-4 sm:px-6 py-4 flex justify-between items-center shrink-0 ${t.nav}`}
               >
                 {[
                   { id: "home", icon: Users, label: "Home" },
                   { id: "properties", icon: Home, label: "Assets" },
+                  { id: "cards", icon: BookOpen, label: "Cards" },
                   { id: "history", icon: HistoryIcon, label: "Ledger" },
                   { id: "settings", icon: Settings, label: "Settings" },
                 ].map((tab) => (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
+                    onClick={clickHandler(() => setActiveTab(tab.id))}
                     className={`flex flex-col items-center gap-1.5 w-16 transition-colors duration-200 ${activeTab === tab.id ? (isDark ? "text-white" : "text-slate-900") : t.textMuted}`}
                   >
                     <tab.icon
@@ -3383,6 +4167,7 @@ export default function App() {
 
           {/* OVERLAYS THAT MUST WORK EVERYWHERE */}
           {isEditingBoard && renderBoardEditor()}
+          {isEditingDeck && renderDeckEditor()}
           {tradeWizard && renderTradeWizard()}
 
           {/* GLOBAL BMS GROUP POPUP OVERLAY */}
@@ -3531,7 +4316,7 @@ export default function App() {
                         .map((p) => (
                           <button
                             key={p.id}
-                            onClick={() => setTargetId(p.id)}
+                            onClick={clickHandler(() => setTargetId(p.id))}
                             className={`px-4 py-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all duration-200 ${targetId === p.id ? "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400 scale-105" : `${t.input} ${t.textFaint} hover:border-amber-500/50`}`}
                           >
                             <span
@@ -3544,7 +4329,7 @@ export default function App() {
                   </div>
 
                   <button
-                    onClick={() => {
+                    onClick={clickHandler(() => {
                       if (!targetId || !state.treasureBucket) return;
                       dispatch({ type: "CLEAR_ERROR" });
                       dispatch({
@@ -3556,7 +4341,7 @@ export default function App() {
                           type: "B2P",
                         },
                       });
-                    }}
+                    })}
                     disabled={!targetId || !state.treasureBucket}
                     className={`w-full py-4 rounded-2xl text-lg font-black flex items-center justify-center gap-2 transition-all duration-200 ${!targetId || !state.treasureBucket ? "opacity-50 cursor-not-allowed " + t.input : "bg-amber-500 text-white shadow-lg shadow-amber-500/30 hover:scale-[1.02] active:scale-95"}`}
                   >
@@ -3609,7 +4394,7 @@ export default function App() {
                         .map((p) => (
                           <button
                             key={p.id}
-                            onClick={() => setTargetId(p.id)}
+                            onClick={clickHandler(() => setTargetId(p.id))}
                             className={`flex-shrink-0 px-4 py-2 rounded-xl border transition-all duration-200 ${targetId === p.id ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 scale-105" : `${t.input} ${t.textFaint} hover:border-emerald-500/50`}`}
                           >
                             {p.name}
@@ -3671,7 +4456,7 @@ export default function App() {
                   </div>
 
                   <button
-                    onClick={() => {
+                    onClick={clickHandler(() => {
                       if (!targetId || amountStr === "0") return;
                       dispatch({ type: "CLEAR_ERROR" });
                       dispatch({
@@ -3684,7 +4469,7 @@ export default function App() {
                           msgOverride: "Bank transferred Go Cash/Bonus",
                         },
                       });
-                    }}
+                    })}
                     disabled={!targetId || amountStr === "0"}
                     className={`w-full py-3 rounded-2xl text-lg font-black flex items-center justify-center gap-2 transition-all duration-200 ${!targetId || amountStr === "0" ? "opacity-50 cursor-not-allowed " + t.input : "bg-emerald-500 text-white shadow-lg shadow-emerald-500/30 hover:scale-[1.02] active:scale-95"}`}
                   >
@@ -3703,7 +4488,7 @@ export default function App() {
                       </p>
                     </div>
                     <button
-                      onClick={() =>
+                      onClick={clickHandler(() =>
                         dispatch({
                           type: "UPDATE_SETTINGS",
                           payload: {
@@ -3712,8 +4497,8 @@ export default function App() {
                                 ? true
                                 : false,
                           },
-                        })
-                      }
+                        }),
+                      )}
                       className={`w-12 h-6 rounded-full transition-colors relative ${state.settings.enableTreasureBucket !== false ? "bg-amber-500" : isDark ? "bg-neutral-700" : "bg-slate-300"}`}
                     >
                       <div
@@ -3838,16 +4623,16 @@ export default function App() {
                         </p>
                         <div className="flex gap-3 w-full">
                           <button
-                            onClick={() => {
+                            onClick={clickHandler(() => {
                               setPropConfirmAction(null);
                               dispatch({ type: "CLEAR_ERROR" });
-                            }}
+                            })}
                             className={`flex-1 py-3 font-bold rounded-xl transition-all duration-200 active:scale-95 ${t.input}`}
                           >
                             Cancel
                           </button>
                           <button
-                            onClick={handlePropAction}
+                            onClick={clickHandler(handlePropAction)}
                             className="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-500/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
                           >
                             Confirm
@@ -3909,7 +4694,13 @@ export default function App() {
                                   className={`w-28 text-4xl font-black bg-transparent border-b-2 border-emerald-500 focus:outline-none text-center ${t.textMain}`}
                                 />
                                 <button
-                                  onClick={() => setIsEditingBuyPrice(false)}
+                                  onClick={clickHandler(() => {
+                                    setIsEditingBuyPrice(false);
+                                    showToast(
+                                      "Custom price set for this transaction",
+                                      "success",
+                                    );
+                                  })}
                                   className="p-2 bg-emerald-500 text-white rounded-full hover:bg-emerald-400 active:scale-95 transition-all"
                                 >
                                   <Check size={16} />
@@ -3923,7 +4714,9 @@ export default function App() {
                                   ${customBuyPrice}
                                 </span>
                                 <button
-                                  onClick={() => setIsEditingBuyPrice(true)}
+                                  onClick={clickHandler(() =>
+                                    setIsEditingBuyPrice(true),
+                                  )}
                                   className={`p-2 rounded-full transition-colors ${isDark ? "text-emerald-400 hover:bg-emerald-400/10" : "text-emerald-600 hover:bg-emerald-600/10"}`}
                                 >
                                   <Edit3 size={18} />
@@ -3943,14 +4736,14 @@ export default function App() {
                                 .map((p) => (
                                   <button
                                     key={p.id}
-                                    onClick={() =>
+                                    onClick={clickHandler(() =>
                                       setPropConfirmAction({
                                         type: "BUY",
                                         playerId: p.id,
                                         amount:
                                           parseInt(customBuyPrice, 10) || 0,
-                                      })
-                                    }
+                                      }),
+                                    )}
                                     className={`py-3 rounded-xl border flex flex-col items-center gap-1 transition-all duration-200 active:scale-95 ${t.input} ${t.borderHover}`}
                                   >
                                     <span
@@ -4000,13 +4793,13 @@ export default function App() {
                                 </span>
                               </div>
                               <button
-                                onClick={() =>
+                                onClick={clickHandler(() =>
                                   setPropConfirmAction({
                                     type: "UNMORTGAGE",
                                     playerId: owner.id,
                                     amount: unmortgageCost,
-                                  })
-                                }
+                                  }),
+                                )}
                                 className="w-full bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 font-bold py-3 rounded-xl hover:scale-[1.02] active:scale-95 transition-all duration-200"
                               >
                                 Unmortgage (${unmortgageCost})
@@ -4089,13 +4882,13 @@ export default function App() {
                                       </div>
                                       <div className="flex gap-2 flex-col sm:flex-row">
                                         <button
-                                          onClick={() =>
+                                          onClick={clickHandler(() =>
                                             setPropConfirmAction({
                                               type: "BUILD",
                                               playerId: owner.id,
                                               amount: nextBuildCost,
-                                            })
-                                          }
+                                            }),
+                                          )}
                                           disabled={
                                             pState.houses >= maxBuildings ||
                                             !canBuild ||
@@ -4106,13 +4899,13 @@ export default function App() {
                                           Build ({nextBuildCost})
                                         </button>
                                         <button
-                                          onClick={() =>
+                                          onClick={clickHandler(() =>
                                             setPropConfirmAction({
                                               type: "SELL_BUILD",
                                               playerId: owner.id,
                                               amount: currentSellValue,
-                                            })
-                                          }
+                                            }),
+                                          )}
                                           disabled={
                                             pState.houses === 0 || !isEvenSell
                                           }
@@ -4148,13 +4941,13 @@ export default function App() {
                                   );
                                 })()}
                               <button
-                                onClick={() =>
+                                onClick={clickHandler(() =>
                                   setPropConfirmAction({
                                     type: "MORTGAGE",
                                     playerId: owner.id,
                                     amount: propDef.mort,
-                                  })
-                                }
+                                  }),
+                                )}
                                 disabled={pState.houses > 0}
                                 className={`w-full disabled:opacity-50 text-amber-500 font-bold py-3 rounded-xl transition-all duration-200 active:scale-95 border ${t.input} hover:border-amber-500/50`}
                               >
@@ -4166,7 +4959,7 @@ export default function App() {
                           {!pState.mortgaged && (
                             <div className={`pt-4 border-t ${t.border}`}>
                               <button
-                                onClick={() => {
+                                onClick={clickHandler(() => {
                                   setTradeWizard({
                                     step: 1,
                                     p1Id: owner.id,
@@ -4177,7 +4970,7 @@ export default function App() {
                                     p2Offer: { cash: 0, props: [] },
                                   });
                                   setActivePropId(null);
-                                }}
+                                })}
                                 className={`w-full py-3 rounded-xl border font-bold flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${t.input} hover:border-sky-500 text-sky-500`}
                               >
                                 <ArrowRightLeft size={16} /> Open Trade Wizard
@@ -4240,39 +5033,39 @@ export default function App() {
                       className={`flex p-2 gap-2 border-b overflow-x-auto hide-scrollbar shrink-0 ${t.modalHeader}`}
                     >
                       <button
-                        onClick={() => {
+                        onClick={clickHandler(() => {
                           setTxType("PAY_PLAYER");
                           dispatch({ type: "CLEAR_ERROR" });
-                        }}
+                        })}
                         className={`shrink-0 flex-1 whitespace-nowrap min-w-[80px] h-10 px-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all duration-200 flex items-center justify-center ${txType === "PAY_PLAYER" ? "bg-sky-500 text-white shadow-md shadow-sky-500/20" : t.actionTabNormal}`}
                       >
                         Pay Player
                       </button>
                       <button
-                        onClick={() => {
+                        onClick={clickHandler(() => {
                           setTxType("PAY_BANK");
                           dispatch({ type: "CLEAR_ERROR" });
-                        }}
+                        })}
                         className={`shrink-0 flex-1 whitespace-nowrap min-w-[80px] h-10 px-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all duration-200 flex items-center justify-center ${txType === "PAY_BANK" ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/20" : t.actionTabNormal}`}
                       >
                         Pay Bank
                       </button>
                       {state.settings.enableTreasureBucket !== false && (
                         <button
-                          onClick={() => {
+                          onClick={clickHandler(() => {
                             setTxType("PAY_BUCKET");
                             dispatch({ type: "CLEAR_ERROR" });
-                          }}
+                          })}
                           className={`shrink-0 flex-1 whitespace-nowrap min-w-[80px] h-10 px-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all duration-200 flex items-center justify-center ${txType === "PAY_BUCKET" ? "bg-amber-500 text-white shadow-md shadow-amber-500/20" : t.actionTabNormal}`}
                         >
                           Pay Bucket
                         </button>
                       )}
                       <button
-                        onClick={() => {
+                        onClick={clickHandler(() => {
                           setTxType("DEBT");
                           dispatch({ type: "CLEAR_ERROR" });
-                        }}
+                        })}
                         disabled={!state.settings.enableDebt}
                         className={`shrink-0 flex-1 whitespace-nowrap min-w-[80px] h-10 px-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all duration-200 flex items-center justify-center ${txType === "DEBT" ? "bg-rose-500 text-white shadow-md shadow-rose-500/20" : t.actionTabNormal} ${!state.settings.enableDebt ? "opacity-30 cursor-not-allowed hover:bg-transparent" : ""}`}
                       >
@@ -4280,10 +5073,10 @@ export default function App() {
                       </button>
                       {activeP.debt > 0 && (
                         <button
-                          onClick={() => {
+                          onClick={clickHandler(() => {
                             setTxType("REPAY");
                             dispatch({ type: "CLEAR_ERROR" });
-                          }}
+                          })}
                           className={`shrink-0 flex-1 whitespace-nowrap min-w-[80px] h-10 px-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all duration-200 flex items-center justify-center ${txType === "REPAY" ? "bg-purple-500 text-white shadow-md shadow-purple-500/20" : t.actionTabNormal}`}
                         >
                           Repay
@@ -4303,7 +5096,7 @@ export default function App() {
                             {availableTargets.map((p) => (
                               <button
                                 key={p.id}
-                                onClick={() => setTargetId(p.id)}
+                                onClick={clickHandler(() => setTargetId(p.id))}
                                 className={`flex-shrink-0 px-4 py-2 rounded-xl border transition-all duration-200 flex items-center gap-2 ${targetId === p.id ? `border-sky-500 shadow-md ${t.p2pTag} scale-105` : `${t.input} ${t.textFaint} hover:border-sky-500/50`}`}
                               >
                                 <span
@@ -4373,7 +5166,7 @@ export default function App() {
                       </div>
 
                       <button
-                        onClick={executeTx}
+                        onClick={clickHandler(executeTx)}
                         disabled={
                           amountStr === "0" ||
                           (txType === "PAY_PLAYER" && !targetId)
@@ -4419,31 +5212,33 @@ export default function App() {
                     </p>
                     <div className="flex flex-col gap-3 w-full">
                       <button
-                        onClick={() => dispatch({ type: "DISMISS_BANKRUPTCY" })}
+                        onClick={clickHandler(() =>
+                          dispatch({ type: "DISMISS_BANKRUPTCY" }),
+                        )}
                         className={`w-full py-3 font-bold rounded-xl transition-all duration-200 active:scale-95 ${t.input}`}
                       >
                         Resolve Debt Manually
                       </button>
                       <button
-                        onClick={() => {
+                        onClick={clickHandler(() => {
                           dispatch({
                             type: "BANKRUPT_PLAYER",
                             payload: p.id,
                           });
                           showToast(`${p.name} is bankrupt`, "error");
-                        }}
+                        })}
                         className="w-full py-3 bg-rose-500/10 text-rose-500 font-bold rounded-xl border border-rose-500/20 hover:bg-rose-500/20 transition-all duration-200 active:scale-95"
                       >
                         Declare Bankrupt
                       </button>
                       <button
-                        onClick={() => {
+                        onClick={clickHandler(() => {
                           dispatch({
                             type: "BANKRUPT_PLAYER",
                             payload: p.id,
                           });
                           dispatch({ type: "END_GAME_RANKING" });
-                        }}
+                        })}
                         className="w-full py-3 bg-rose-600 text-white font-bold rounded-xl shadow-lg shadow-rose-600/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
                       >
                         Declare Bankrupt & End Game
@@ -4472,16 +5267,16 @@ export default function App() {
                 </div>
                 <div className="flex gap-3">
                   <button
-                    onClick={() => setResetConfirm(false)}
+                    onClick={clickHandler(() => setResetConfirm(false))}
                     className={`flex-1 py-3 font-bold rounded-xl transition-all duration-200 active:scale-95 ${t.input}`}
                   >
                     Cancel
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={clickHandler(() => {
                       dispatch({ type: "RESET_GAME" });
                       setResetConfirm(false);
-                    }}
+                    })}
                     className="flex-1 py-3 bg-rose-600 text-white font-black rounded-xl shadow-lg shadow-rose-600/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
                   >
                     Reset
@@ -4508,16 +5303,16 @@ export default function App() {
                 </div>
                 <div className="flex gap-3">
                   <button
-                    onClick={() => setEndGameConfirm(false)}
+                    onClick={clickHandler(() => setEndGameConfirm(false))}
                     className={`flex-1 py-3 font-bold rounded-xl transition-all duration-200 active:scale-95 ${t.input}`}
                   >
                     Cancel
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={clickHandler(() => {
                       dispatch({ type: "END_GAME_RANKING" });
                       setEndGameConfirm(false);
-                    }}
+                    })}
                     className="flex-1 py-3 bg-amber-500 text-white font-black rounded-xl shadow-lg shadow-amber-500/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
                   >
                     End Game
@@ -4549,7 +5344,15 @@ export default function App() {
 
       <style
         dangerouslySetInnerHTML={{
-          __html: `.hide-scrollbar::-webkit-scrollbar { display: none; } .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; } .pb-safe { padding-bottom: env(safe-area-inset-bottom, 1rem); }`,
+          __html: `
+            .hide-scrollbar::-webkit-scrollbar { display: none; } 
+            .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; } 
+            .pb-safe { padding-bottom: env(safe-area-inset-bottom, 1rem); }
+            .perspective-1000 { perspective: 1000px; }
+            .preserve-3d { transform-style: preserve-3d; }
+            .backface-hidden { backface-visibility: hidden; }
+            .rotate-y-180 { transform: rotateY(180deg); }
+          `,
         }}
       />
     </>
