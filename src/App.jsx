@@ -47,6 +47,7 @@ import {
   RefreshCcw,
   Layers,
   Wand2,
+  Dices,
 } from "lucide-react";
 
 // ==========================================
@@ -98,6 +99,39 @@ const playSoundEffect = (type, enabled) => {
       gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
       osc.start(now);
       osc.stop(now + 0.15);
+    } else if (type === "unflip") {
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.exponentialRampToValueAtTime(300, now + 0.1);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    } else if (type === "celebration") {
+      osc.type = "sine";
+      [400, 500, 600, 800].forEach((freq, i) => {
+        osc.frequency.setValueAtTime(freq, now + i * 0.1);
+      });
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      osc.start(now);
+      osc.stop(now + 0.4);
+    } else if (type === "bankrupt") {
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(300, now);
+      osc.frequency.exponentialRampToValueAtTime(50, now + 0.5);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+      osc.start(now);
+      osc.stop(now + 0.5);
+    } else if (type === "dice") {
+      osc.type = "square";
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.exponentialRampToValueAtTime(100, now + 0.05);
+      gain.gain.setValueAtTime(0.05, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+      osc.start(now);
+      osc.stop(now + 0.05);
     }
   } catch (e) {
     // Fail silently if audio is blocked
@@ -287,9 +321,37 @@ const DEFAULT_ACTION_CARDS = [
   {
     id: "ac12",
     title: "Chaos Magic",
-    desc: "Swap properties with a player of your choice (Value must be roughly equal).",
+    desc: "Swap properties with a player of your choice.",
     type: "chaos",
     icon: "Zap",
+  },
+  {
+    id: "ac13",
+    title: "Market Crash",
+    desc: "All players must pay the bank 10% of their cash balance.",
+    type: "chaos",
+    icon: "TrendingDown",
+  },
+  {
+    id: "ac14",
+    title: "Robin Hood",
+    desc: "The richest player must pay the poorest player $150.",
+    type: "chaos",
+    icon: "Users",
+  },
+  {
+    id: "ac15",
+    title: "Property Seizure",
+    desc: "The Bank seizes one random property from the wealthiest player.",
+    type: "penalty",
+    icon: "Landmark",
+  },
+  {
+    id: "ac16",
+    title: "Lottery Winner",
+    desc: "Collect the entire Treasure Bucket immediately!",
+    type: "reward",
+    icon: "Coins",
   },
 ];
 
@@ -780,6 +842,7 @@ const INITIAL_STATE = {
     unmortgageInterest: 10,
     housesBeforeHotel: 4,
     enableTreasureBucket: true,
+    enableDice: true,
     trueDeckMode: false,
     enableSounds: true,
     enableHaptics: true,
@@ -798,16 +861,11 @@ const INITIAL_STATE = {
 // ==========================================
 const checkBmsGroup = (board, propState, propertyId, newOwnerId) => {
   const propDef = board.find((p) => p.id === propertyId);
-  if (
-    !propDef ||
-    !propDef.group ||
-    propDef.group === "Railroad" ||
-    propDef.group === "Utility" ||
-    propDef.group === "Custom"
-  )
-    return null;
+  if (!propDef || propDef.type !== "street") return null;
 
-  const groupProps = board.filter((p) => p.group === propDef.group);
+  const groupProps = board.filter(
+    (p) => p.type === "street" && p.color === propDef.color,
+  );
   if (groupProps.length === 0) return null;
 
   const isNowBmsGroup = groupProps.every((p) => {
@@ -815,9 +873,10 @@ const checkBmsGroup = (board, propState, propertyId, newOwnerId) => {
     return propState[p.id]?.ownerId === newOwnerId;
   });
 
-  const wasBmsGroup = groupProps.every(
-    (p) => propState[p.id]?.ownerId === newOwnerId,
-  );
+  const wasBmsGroup = groupProps.every((p) => {
+    if (p.id === propertyId) return false;
+    return propState[p.id]?.ownerId === newOwnerId;
+  });
 
   if (isNowBmsGroup && !wasBmsGroup) {
     return { group: propDef.group, color: propDef.color || "bg-neutral-500" };
@@ -827,8 +886,10 @@ const checkBmsGroup = (board, propState, propertyId, newOwnerId) => {
 
 const doesGroupHaveHouses = (board, propState, propertyId) => {
   const propDef = board.find((p) => p.id === propertyId);
-  if (!propDef) return false;
-  const groupProps = board.filter((p) => p.group === propDef.group);
+  if (!propDef || propDef.type !== "street") return false;
+  const groupProps = board.filter(
+    (p) => p.type === "street" && p.color === propDef.color,
+  );
   return groupProps.some((p) => propState[p.id]?.houses > 0);
 };
 
@@ -856,6 +917,8 @@ function gameReducer(state, action) {
 
     case "ADD_PLAYER": {
       const name = action.payload.name.trim();
+      if (!name) return state;
+
       if (
         state.players.some((p) => p.name.toLowerCase() === name.toLowerCase())
       ) {
@@ -939,7 +1002,7 @@ function gameReducer(state, action) {
         if (senderIdx === -1) return state;
 
         newPlayers[senderIdx].balance -= amountNum;
-        if (newPlayers[senderIdx].balance === 0) {
+        if (newPlayers[senderIdx].balance <= 0 && type !== "BANKRUPTCY") {
           triggeredBankruptcy = newPlayers[senderIdx].id;
         }
 
@@ -981,7 +1044,7 @@ function gameReducer(state, action) {
         players: newPlayers,
         treasureBucket: newTreasureBucket,
         error: null,
-        pendingBankruptcy: triggeredBankruptcy,
+        pendingBankruptcy: triggeredBankruptcy || state.pendingBankruptcy,
         pendingJackpotAlert: pendingJackpotAlert || state.pendingJackpotAlert,
         history: [
           {
@@ -1106,15 +1169,15 @@ function gameReducer(state, action) {
       });
 
       let triggeredBankruptcy = null;
-      if (newPlayers[p1Idx].balance === 0) triggeredBankruptcy = p1Id;
-      else if (newPlayers[p2Idx].balance === 0) triggeredBankruptcy = p2Id;
+      if (newPlayers[p1Idx].balance <= 0) triggeredBankruptcy = p1Id;
+      else if (newPlayers[p2Idx].balance <= 0) triggeredBankruptcy = p2Id;
 
       return {
         ...state,
         players: newPlayers,
         propertyState: newPropState,
         error: null,
-        pendingBankruptcy: triggeredBankruptcy,
+        pendingBankruptcy: triggeredBankruptcy || state.pendingBankruptcy,
         pendingBmsAlert: p1GotBms || p2GotBms || null,
         pendingTradeAlert: { p1Name, p2Name },
         history: [
@@ -1207,14 +1270,14 @@ function gameReducer(state, action) {
       }
 
       let triggeredBankruptcy = null;
-      if (newPlayers[pIdx].balance === 0) triggeredBankruptcy = playerId;
+      if (newPlayers[pIdx].balance <= 0) triggeredBankruptcy = playerId;
 
       return {
         ...state,
         players: newPlayers,
         propertyState: newPropState,
         error: null,
-        pendingBankruptcy: triggeredBankruptcy,
+        pendingBankruptcy: triggeredBankruptcy || state.pendingBankruptcy,
         pendingBmsAlert: newlyFormedBms
           ? {
               playerName:
@@ -1462,6 +1525,82 @@ const renderDynamicIcon = (iconName, size, className) => {
 };
 
 // ==========================================
+// DICE COMPONENT
+// ==========================================
+const DiceRoller = ({ t, doAudio, doHaptic }) => {
+  const [dice, setDice] = useState([1, 1]);
+  const [isRolling, setIsRolling] = useState(false);
+
+  const roll = () => {
+    if (isRolling) return;
+    setIsRolling(true);
+    let rolls = 0;
+    doHaptic([20, 30, 20]);
+
+    const interval = setInterval(() => {
+      setDice([
+        Math.floor(Math.random() * 6) + 1,
+        Math.floor(Math.random() * 6) + 1,
+      ]);
+      doAudio("dice");
+      rolls++;
+      if (rolls > 12) {
+        clearInterval(interval);
+        setIsRolling(false);
+        doAudio("tap");
+      }
+    }, 50);
+  };
+
+  const renderPip = (active) => (
+    <div
+      className={`w-2.5 h-2.5 rounded-full ${active ? "bg-slate-800" : "bg-transparent"}`}
+    />
+  );
+
+  const getPips = (val) => {
+    return (
+      <div className="grid grid-cols-3 grid-rows-3 gap-0.5 p-1 w-full h-full items-center justify-items-center">
+        {renderPip(val > 3)} {renderPip(false)} {renderPip(val > 1)}
+        {renderPip(val === 6)} {renderPip(val % 2 !== 0)} {renderPip(val === 6)}
+        {renderPip(val > 1)} {renderPip(false)} {renderPip(val > 3)}
+      </div>
+    );
+  };
+
+  return (
+    <button
+      onClick={roll}
+      disabled={isRolling}
+      className={`w-full border rounded-3xl p-5 relative overflow-hidden transition-all duration-200 active:scale-[0.98] ${t.card} hover:border-sky-500/50 flex flex-col justify-between items-center group`}
+    >
+      <div
+        className={`absolute -right-2 -top-2 pointer-events-none transition-opacity ${t.isDark ? "opacity-5" : "opacity-[0.03] text-black"}`}
+      >
+        <Dices size={90} />
+      </div>
+      <div className="flex gap-4 mb-4 relative z-10">
+        <div
+          className={`w-14 h-14 bg-white rounded-xl shadow-md border border-slate-200 flex items-center justify-center transition-transform ${isRolling ? "animate-bounce" : "group-hover:scale-105"}`}
+        >
+          {getPips(dice[0])}
+        </div>
+        <div
+          className={`w-14 h-14 bg-white rounded-xl shadow-md border border-slate-200 flex items-center justify-center transition-transform ${isRolling ? "animate-bounce delay-75" : "group-hover:scale-105"}`}
+        >
+          {getPips(dice[1])}
+        </div>
+      </div>
+      <div className="relative z-10 w-full text-center">
+        <span className="text-sky-500 text-[10px] font-bold uppercase tracking-widest bg-sky-500/10 px-4 py-1.5 rounded-full border border-sky-500/20 w-max">
+          Roll Dice
+        </span>
+      </div>
+    </button>
+  );
+};
+
+// ==========================================
 // MAIN APP COMPONENT
 // ==========================================
 export default function App() {
@@ -1542,18 +1681,21 @@ export default function App() {
   const prevDrawnCardTimestamp = useRef(0);
   const [toast, setToast] = useState(null);
 
-  const showToast = (msg, type = "success") => {
-    setToast({ msg, type, id: Date.now() });
-    setTimeout(() => setToast(null), 3000);
-    if (type === "success") {
-      doAudio("success");
-      doHaptic(40);
-    }
-    if (type === "error") {
-      doAudio("error");
-      doHaptic([50, 50, 50]);
-    }
-  };
+  const showToast = useCallback(
+    (msg, type = "success") => {
+      setToast({ msg, type, id: Date.now() });
+      setTimeout(() => setToast(null), 3000);
+      if (type === "success") {
+        doAudio("success");
+        doHaptic(40);
+      }
+      if (type === "error") {
+        doAudio("error");
+        doHaptic([50, 50, 50]);
+      }
+    },
+    [doAudio, doHaptic],
+  );
 
   useEffect(() => {
     const saved = localStorage.getItem("bms_state");
@@ -1573,6 +1715,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("bms_state", JSON.stringify(state));
   }, [state]);
+
+  // Handle auto-bankrupt sound
+  useEffect(() => {
+    if (state.pendingBankruptcy) {
+      doAudio("bankrupt");
+      doHaptic([50, 100, 200, 100]);
+    }
+  }, [state.pendingBankruptcy, doAudio, doHaptic]);
 
   // Make sure we default to the Home tab on state changes like starting a game
   useEffect(() => {
@@ -1612,7 +1762,7 @@ export default function App() {
       setAmountStr("0");
     }
     prevHistoryLength.current = state.history.length;
-  }, [state.history.length]);
+  }, [state.history.length, showToast]);
 
   // Handle Full Screen Alerts
   useEffect(() => {
@@ -1626,7 +1776,7 @@ export default function App() {
       if (state.pendingTradeAlert) setTradeAlert(state.pendingTradeAlert);
 
       dispatch({ type: "CLEAR_ALERTS" });
-      doAudio("success");
+      doAudio("celebration");
       doHaptic([100, 50, 100, 50, 100]); // Celebration Haptic
 
       // Auto-dismiss after 5s if user hasn't clicked/tapped
@@ -1645,8 +1795,9 @@ export default function App() {
     doHaptic,
   ]);
 
-  // Watch for new Action Card drawn to trigger flip animation
+  // Watch for new Action Card drawn to trigger flip animation and auto-reset
   useEffect(() => {
+    let timer;
     if (
       state.lastDrawnCard &&
       state.lastDrawnCard.timestamp !== prevDrawnCardTimestamp.current
@@ -1661,7 +1812,17 @@ export default function App() {
         setCardFlipState(true);
       }, 50);
     }
-  }, [state.lastDrawnCard, doAudio, doHaptic]);
+
+    if (cardFlipState) {
+      timer = setTimeout(() => {
+        setCardFlipState(false);
+        doAudio("unflip");
+        doHaptic(20);
+      }, 8000);
+    }
+
+    return () => clearTimeout(timer);
+  }, [state.lastDrawnCard, cardFlipState, doAudio, doHaptic]);
 
   // Instant dismissal of celebration alerts via keyboard
   useEffect(() => {
@@ -1669,14 +1830,17 @@ export default function App() {
       if (bmsAlert) setBmsAlert(null);
       if (jackpotAlert) setJackpotAlert(null);
       if (tradeAlert) setTradeAlert(null);
-      if (cardFlipState) setCardFlipState(false);
+      if (cardFlipState) {
+        setCardFlipState(false);
+        doAudio("unflip");
+      }
     };
 
     if (bmsAlert || jackpotAlert || tradeAlert || cardFlipState) {
       window.addEventListener("keydown", handleKeyDown);
     }
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [bmsAlert, jackpotAlert, tradeAlert, cardFlipState]);
+  }, [bmsAlert, jackpotAlert, tradeAlert, cardFlipState, doAudio]);
 
   const clickHandler = (actionFn) => {
     return (e) => {
@@ -2462,18 +2626,20 @@ export default function App() {
                 </p>
                 <div className="flex gap-2 items-center">
                   {/* Robust native color picker fallback */}
-                  <input
-                    type="color"
-                    value={tempCustomColor}
-                    onChange={(e) => setTempCustomColor(e.target.value)}
-                    className="w-12 h-12 rounded cursor-pointer shrink-0"
-                  />
+                  <div className="relative w-12 h-12 rounded overflow-hidden shrink-0 shadow-sm border border-black/20">
+                    <input
+                      type="color"
+                      value={tempCustomColor}
+                      onChange={(e) => setTempCustomColor(e.target.value)}
+                      className="absolute inset-[-10px] w-16 h-16 cursor-pointer"
+                    />
+                  </div>
                   <input
                     type="text"
                     value={tempCustomColor}
                     onChange={(e) => setTempCustomColor(e.target.value)}
                     placeholder="#HexCode"
-                    className={`flex-1 font-bold rounded-xl px-3 py-3 border transition-colors focus:outline-none ${t.input}`}
+                    className={`flex-1 font-bold rounded-xl px-3 py-3 border transition-colors focus:outline-none uppercase ${t.input}`}
                   />
                 </div>
                 <button
@@ -2826,6 +2992,10 @@ export default function App() {
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && newPlayerName.trim()) {
+                    if (/^\d+$/.test(newPlayerName.trim())) {
+                      showToast("Name cannot be numbers only", "error");
+                      return;
+                    }
                     doAudio("tap");
                     doHaptic(10);
                     dispatch({
@@ -2841,6 +3011,10 @@ export default function App() {
               <button
                 onClick={clickHandler(() => {
                   if (newPlayerName.trim()) {
+                    if (/^\d+$/.test(newPlayerName.trim())) {
+                      showToast("Name cannot be numbers only", "error");
+                      return;
+                    }
                     dispatch({
                       type: "ADD_PLAYER",
                       payload: { name: newPlayerName },
@@ -3152,6 +3326,16 @@ export default function App() {
                         </button>
                       )}
                     </div>
+
+                    {state.settings.enableDice && (
+                      <div className="animate-in fade-in slide-in-from-top-4 duration-300">
+                        <DiceRoller
+                          t={t}
+                          doAudio={doAudio}
+                          doHaptic={doHaptic}
+                        />
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {state.players.map((p) => {
@@ -3522,8 +3706,8 @@ export default function App() {
 
                         {/* CARD FRONT */}
                         <div
-                          className={`absolute inset-0 backface-hidden rotate-y-180 w-full h-full rounded-3xl border shadow-2xl flex flex-col items-center text-center p-6 bg-white border-slate-200
-                          ${visibleCardData?.type === "penalty" ? "shadow-[0_0_50px_rgba(225,29,72,0.6)]" : visibleCardData?.type === "reward" ? "shadow-[0_0_50px_rgba(16,185,129,0.6)]" : "shadow-xl"}
+                          className={`absolute inset-0 backface-hidden rotate-y-180 w-full h-full rounded-3xl border shadow-2xl flex flex-col items-center text-center p-6 ${t.modalBg}
+                          ${visibleCardData?.type === "penalty" ? "shadow-[0_0_50px_rgba(225,29,72,0.4)] border-rose-500/30" : visibleCardData?.type === "reward" ? "shadow-[0_0_50px_rgba(16,185,129,0.4)] border-emerald-500/30" : "shadow-[0_0_50px_rgba(245,158,11,0.4)] border-amber-500/30"}
                         `}
                         >
                           {visibleCardData?.type === "reward" && <Confetti />}
@@ -3532,24 +3716,34 @@ export default function App() {
                           />
 
                           <div
-                            className={`p-4 rounded-full mb-4 ${visibleCardData?.type === "penalty" ? "bg-rose-100 text-rose-600" : visibleCardData?.type === "reward" ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-600"}`}
+                            className={`p-4 rounded-full mb-4 ${visibleCardData?.type === "penalty" ? "bg-rose-500/20 text-rose-500" : visibleCardData?.type === "reward" ? "bg-emerald-500/20 text-emerald-500" : "bg-amber-500/20 text-amber-500"}`}
                           >
                             {visibleCardData?.icon &&
                               renderDynamicIcon(visibleCardData.icon, 32, "")}
                           </div>
 
-                          <h3 className="text-2xl font-black text-slate-900 leading-tight mb-2">
+                          <h3
+                            className={`text-2xl font-black leading-tight mb-2 ${t.textMain}`}
+                          >
                             {visibleCardData?.title}
                           </h3>
-                          <p className="text-slate-600 font-medium text-sm mb-auto">
+                          <p
+                            className={`font-medium text-sm mb-auto ${t.textMuted}`}
+                          >
                             {visibleCardData?.desc}
                           </p>
 
-                          <div className="w-full pt-4 mt-4 border-t border-slate-200 flex flex-col gap-1 relative z-20">
-                            <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">
+                          <div
+                            className={`w-full pt-4 mt-4 border-t flex flex-col gap-1 relative z-20 ${t.border}`}
+                          >
+                            <span
+                              className={`text-[10px] uppercase font-bold tracking-widest ${t.textMuted}`}
+                            >
                               Drawn By
                             </span>
-                            <span className="text-sm font-black text-slate-900">
+                            <span
+                              className={`text-sm font-black ${t.textMain}`}
+                            >
                               {visibleCardData?.drawnBy}
                             </span>
                           </div>
@@ -3878,13 +4072,38 @@ export default function App() {
                           />
                         </button>
                       </div>
+                      <div className="flex justify-between items-center pt-4 border-t border-black/10">
+                        <div>
+                          <h3 className={`font-bold ${t.textMain}`}>
+                            Dice Roller
+                          </h3>
+                        </div>
+                        <button
+                          onClick={() =>
+                            dispatch({
+                              type: "UPDATE_SETTINGS",
+                              payload: {
+                                enableDice:
+                                  state.settings.enableDice === false
+                                    ? true
+                                    : false,
+                              },
+                            })
+                          }
+                          className={`w-12 h-6 rounded-full transition-colors relative ${state.settings.enableDice !== false ? "bg-emerald-500" : isDark ? "bg-neutral-700" : "bg-slate-300"}`}
+                        >
+                          <div
+                            className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${state.settings.enableDice !== false ? "translate-x-6" : "translate-x-0"}`}
+                          />
+                        </button>
+                      </div>
                     </div>
 
                     <div
                       className={`border rounded-3xl p-6 transition-colors ${t.card}`}
                     >
-                      <div className="flex justify-between items-center mb-4">
-                        <div>
+                      <div className="flex justify-between items-center mb-4 gap-4">
+                        <div className="flex-1">
                           <h3 className={`font-bold ${t.textMain}`}>
                             Action Deck System
                           </h3>
@@ -3902,7 +4121,7 @@ export default function App() {
                               },
                             }),
                           )}
-                          className={`w-12 h-6 rounded-full transition-colors relative ${state.settings.trueDeckMode ? "bg-emerald-500" : isDark ? "bg-neutral-700" : "bg-slate-300"}`}
+                          className={`shrink-0 w-12 h-6 rounded-full transition-colors relative ${state.settings.trueDeckMode ? "bg-emerald-500" : isDark ? "bg-neutral-700" : "bg-slate-300"}`}
                         >
                           <div
                             className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${state.settings.trueDeckMode ? "translate-x-6" : "translate-x-0"}`}
@@ -3948,8 +4167,8 @@ export default function App() {
                     <div
                       className={`border rounded-3xl p-6 transition-colors ${t.card}`}
                     >
-                      <div className="flex justify-between items-center mb-4">
-                        <div>
+                      <div className="flex justify-between items-center mb-4 gap-4">
+                        <div className="flex-1">
                           <h3 className={`font-bold ${t.textMain}`}>
                             Debt System
                           </h3>
@@ -3966,7 +4185,7 @@ export default function App() {
                               },
                             }),
                           )}
-                          className={`w-12 h-6 rounded-full transition-colors relative ${state.settings.enableDebt ? "bg-emerald-500" : isDark ? "bg-neutral-700" : "bg-slate-300"}`}
+                          className={`shrink-0 w-12 h-6 rounded-full transition-colors relative ${state.settings.enableDebt ? "bg-emerald-500" : isDark ? "bg-neutral-700" : "bg-slate-300"}`}
                         >
                           <div
                             className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${state.settings.enableDebt ? "translate-x-6" : "translate-x-0"}`}
@@ -4093,7 +4312,7 @@ export default function App() {
                       <div className="flex justify-between items-center">
                         <div>
                           <p className={`font-bold ${t.textMain}`}>
-                            Version 6.5.0 (Beta)
+                            Version 6.6.0 (Beta)
                           </p>
                           <p className={`text-sm ${t.textMuted}`}>
                             Developed by Yousuf with AI
